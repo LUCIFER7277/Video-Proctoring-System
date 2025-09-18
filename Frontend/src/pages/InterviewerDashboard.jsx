@@ -88,8 +88,20 @@ const InterviewerDashboard = () => {
     if (localStream && socket && !peerConnectionRef.current) {
       console.log('Local stream available, initializing peer connection...');
       initializePeerConnection();
+
+      // Join room now that peer connection is ready
+      if (socket.connected) {
+        console.log('Socket connected, joining room now...');
+        socket.emit('join-room', { sessionId, role: 'interviewer' });
+      }
+
+      // Check if candidate is already waiting
+      if (candidateConnected) {
+        console.log('Candidate already connected, attempting to initiate call...');
+        waitForReadyAndCall('peer-connection-initialized');
+      }
     }
-  }, [localStream, socket]);
+  }, [localStream, socket, candidateConnected]);
 
   // Ensure video elements get streams when refs are available
   useEffect(() => {
@@ -110,7 +122,12 @@ const InterviewerDashboard = () => {
     try {
       console.log('Starting connection initialization...');
 
-      // Initialize socket connection
+      // First, get user media for interviewer
+      console.log('Getting interviewer media stream...');
+      await initializeLocalStream();
+
+      // Then initialize socket connection after media is ready
+      console.log('Media ready, creating socket connection...');
       const newSocket = io(import.meta.env.VITE_SOCKET_URL, {
         query: {
           sessionId,
@@ -121,10 +138,6 @@ const InterviewerDashboard = () => {
       setSocket(newSocket);
       setupSocketListeners(newSocket);
 
-      // Get user media for interviewer
-      console.log('Getting interviewer media stream...');
-      await initializeLocalStream();
-
       setIsConnected(true);
 
     } catch (error) {
@@ -132,10 +145,29 @@ const InterviewerDashboard = () => {
     }
   };
 
+  const waitForReadyAndCall = (trigger) => {
+    console.log(`Attempting to initiate call (triggered by: ${trigger})`);
+
+    if (peerConnectionRef.current && localStream) {
+      console.log(`Ready to initiate call (${trigger})`);
+      initiateCall();
+    } else {
+      console.log(`Not ready for call - Peer connection: ${peerConnectionRef.current ? 'ready' : 'not ready'}, Local stream: ${localStream ? 'ready' : 'not ready'}`);
+    }
+  };
+
   const setupSocketListeners = (socket) => {
     socket.on('connect', () => {
       console.log('Interviewer socket connected');
-      socket.emit('join-room', { sessionId, role: 'interviewer' });
+
+      // Only join room after peer connection is ready
+      if (peerConnectionRef.current) {
+        console.log('Peer connection ready, joining room...');
+        socket.emit('join-room', { sessionId, role: 'interviewer' });
+      } else {
+        console.log('Waiting for peer connection before joining room...');
+        // Will join room when peer connection is created
+      }
     });
 
     socket.on('candidate-joined', (candidateData) => {
@@ -143,22 +175,14 @@ const InterviewerDashboard = () => {
       setCandidateConnected(true);
       setCandidateInfo(candidateData);
 
-      // Wait a moment for candidate to set up their peer connection
-      setTimeout(() => {
-        if (peerConnectionRef.current && localStream) {
-          console.log('Initiating WebRTC call after candidate setup delay...');
-          initiateCall();
-        } else {
-          console.warn('Peer connection or local stream not ready yet');
-        }
-      }, 1000);
+      // Try to initiate call after candidate setup
+      waitForReadyAndCall('candidate-joined');
     });
 
     socket.on('candidate-ready', () => {
       console.log('Candidate is ready for WebRTC connection');
-      if (peerConnectionRef.current && localStream && candidateConnected) {
-        console.log('Initiating WebRTC call after candidate ready signal...');
-        initiateCall();
+      if (candidateConnected) {
+        waitForReadyAndCall('candidate-ready');
       }
     });
 
