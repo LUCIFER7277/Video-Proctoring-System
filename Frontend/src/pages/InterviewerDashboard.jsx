@@ -81,8 +81,33 @@ const InterviewerDashboard = () => {
     };
   }, [sessionId, navigate]);
 
+  // Initialize peer connection when localStream is available
+  useEffect(() => {
+    if (localStream && socket && !peerConnectionRef.current) {
+      console.log('Local stream available, initializing peer connection...');
+      initializePeerConnection();
+    }
+  }, [localStream, socket]);
+
+  // Ensure video elements get streams when refs are available
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      console.log('Setting local video source...');
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  useEffect(() => {
+    if (remoteStream && remoteVideoRef.current) {
+      console.log('Setting remote video source...');
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
   const initializeConnection = async () => {
     try {
+      console.log('Starting connection initialization...');
+
       // Initialize socket connection
       const newSocket = io(import.meta.env.VITE_SOCKET_URL, {
         query: {
@@ -95,10 +120,8 @@ const InterviewerDashboard = () => {
       setupSocketListeners(newSocket);
 
       // Get user media for interviewer
+      console.log('Getting interviewer media stream...');
       await initializeLocalStream();
-
-      // Initialize WebRTC peer connection
-      initializePeerConnection();
 
       setIsConnected(true);
 
@@ -170,6 +193,8 @@ const InterviewerDashboard = () => {
 
   const initializeLocalStream = async () => {
     try {
+      console.log('Requesting interviewer media access...');
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -179,14 +204,28 @@ const InterviewerDashboard = () => {
         audio: true
       });
 
+      console.log('Got media stream with tracks:', stream.getTracks().map(t => `${t.kind}:${t.readyState}`));
+
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+        console.log('Set local video srcObject');
       }
 
-      console.log('Interviewer local stream initialized');
+      console.log('Interviewer local stream initialized successfully');
+      return stream;
     } catch (error) {
       console.error('Failed to get interviewer media:', error);
+
+      if (error.name === 'NotAllowedError') {
+        alert('Camera and microphone access is required for the interview. Please allow access and refresh the page.');
+      } else if (error.name === 'NotFoundError') {
+        alert('No camera or microphone found. Please connect a camera and microphone and refresh the page.');
+      } else {
+        alert('Failed to access camera and microphone: ' + error.message);
+      }
+
+      throw error;
     }
   };
 
@@ -228,12 +267,15 @@ const InterviewerDashboard = () => {
 
     peerConnectionRef.current = peerConnection;
 
-    // Add local stream
+    // Add local stream tracks
     if (localStream) {
       localStream.getTracks().forEach(track => {
-        console.log('Adding track to peer connection:', track.kind);
+        console.log('Adding track to peer connection:', track.kind, track.readyState);
         peerConnection.addTrack(track, localStream);
       });
+      console.log(`Added ${localStream.getTracks().length} tracks to peer connection`);
+    } else {
+      console.warn('No local stream available when initializing peer connection');
     }
   };
 
