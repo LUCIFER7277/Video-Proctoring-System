@@ -53,6 +53,7 @@ const InterviewerDashboard = () => {
   const chatRef = useRef(null);
   const pendingIceCandidatesRef = useRef([]);
   const isCallingRef = useRef(false);
+  const hasJoinedRoomRef = useRef(false);
 
   // Services
   const focusServiceRef = useRef(new FocusDetectionService());
@@ -90,9 +91,10 @@ const InterviewerDashboard = () => {
       initializePeerConnection();
 
       // Join room now that peer connection is ready
-      if (socket.connected) {
+      if (socket.connected && !hasJoinedRoomRef.current) {
         console.log('Socket connected, joining room now...');
         socket.emit('join-room', { sessionId, role: 'interviewer' });
+        hasJoinedRoomRef.current = true;
       }
 
       // Check if candidate is already waiting
@@ -150,6 +152,9 @@ const InterviewerDashboard = () => {
 
     if (peerConnectionRef.current && localStream) {
       console.log(`Ready to initiate call (${trigger})`);
+      console.log(`Connection state: ${peerConnectionRef.current.connectionState}`);
+      console.log(`ICE connection state: ${peerConnectionRef.current.iceConnectionState}`);
+      console.log(`Signaling state: ${peerConnectionRef.current.signalingState}`);
       initiateCall();
     } else {
       console.log(`Not ready for call - Peer connection: ${peerConnectionRef.current ? 'ready' : 'not ready'}, Local stream: ${localStream ? 'ready' : 'not ready'}`);
@@ -160,10 +165,11 @@ const InterviewerDashboard = () => {
     socket.on('connect', () => {
       console.log('Interviewer socket connected');
 
-      // Only join room after peer connection is ready
-      if (peerConnectionRef.current) {
+      // Only join room after peer connection is ready and haven't joined yet
+      if (peerConnectionRef.current && !hasJoinedRoomRef.current) {
         console.log('Peer connection ready, joining room...');
         socket.emit('join-room', { sessionId, role: 'interviewer' });
+        hasJoinedRoomRef.current = true;
       } else {
         console.log('Waiting for peer connection before joining room...');
         // Will join room when peer connection is created
@@ -318,10 +324,18 @@ const InterviewerDashboard = () => {
       // ontrack handler
       (event) => {
         console.log('Received candidate stream');
+        console.log('Event streams:', event.streams.length);
+        console.log('Event tracks:', event.track.kind, event.track.readyState);
+
         const [candidateStream] = event.streams;
+        console.log('Candidate stream tracks:', candidateStream.getTracks().map(t => `${t.kind}:${t.readyState}`));
+
         setRemoteStream(candidateStream);
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = candidateStream;
+          console.log('Set remote video srcObject');
+        } else {
+          console.warn('Remote video ref not available');
         }
         // Start AI detection on candidate stream
         startDetection(candidateStream);
