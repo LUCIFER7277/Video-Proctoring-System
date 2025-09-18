@@ -157,13 +157,32 @@ const InterviewerDashboard = () => {
     });
 
     socket.on('answer', async (answer) => {
-      console.log('Received answer from candidate');
-      await peerConnectionRef.current.setRemoteDescription(answer);
+      try {
+        console.log('Interviewer: Received answer from candidate');
+
+        if (!peerConnectionRef.current) {
+          console.error('Interviewer: No peer connection available when handling answer!');
+          return;
+        }
+
+        console.log('Interviewer: Setting remote description with answer...');
+        await peerConnectionRef.current.setRemoteDescription(answer);
+        console.log('Interviewer: Successfully set remote description');
+      } catch (error) {
+        console.error('Interviewer: Error handling answer:', error);
+      }
     });
 
     socket.on('ice-candidate', async (candidate) => {
-      console.log('Received ICE candidate from candidate');
-      await peerConnectionRef.current.addIceCandidate(candidate);
+      try {
+        console.log('Interviewer: Received ICE candidate from candidate');
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.addIceCandidate(candidate);
+          console.log('Interviewer: Added ICE candidate successfully');
+        }
+      } catch (error) {
+        console.error('Interviewer: Error adding ICE candidate:', error);
+      }
     });
 
     socket.on('chat-message', (message) => {

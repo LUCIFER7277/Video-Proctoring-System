@@ -125,6 +125,29 @@ const CandidateRoom = () => {
     };
   }, [sessionId, navigate]);
 
+  // Initialize peer connection when localStream is available
+  useEffect(() => {
+    if (localStream && socket && !peerConnectionRef.current) {
+      console.log('Candidate: Local stream available, initializing peer connection...');
+      initializePeerConnection();
+    }
+  }, [localStream, socket]);
+
+  // Ensure video elements get streams when refs are available
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      console.log('Candidate: Setting local video source...');
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  useEffect(() => {
+    if (remoteStream && remoteVideoRef.current) {
+      console.log('Candidate: Setting remote video source...');
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
   const checkAvailableDevices = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -182,9 +205,6 @@ const CandidateRoom = () => {
       // Get user media with device-aware constraints
       await initializeLocalStream();
 
-      // Initialize WebRTC peer connection
-      initializePeerConnection();
-
       setConnectionStatus('connected');
       setIsConnected(true);
       setSessionStartTime(new Date());
@@ -235,8 +255,15 @@ const CandidateRoom = () => {
     });
 
     socket.on('ice-candidate', async (candidate) => {
-      console.log('Received ICE candidate');
-      await peerConnectionRef.current.addIceCandidate(candidate);
+      try {
+        console.log('Candidate: Received ICE candidate from interviewer');
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.addIceCandidate(candidate);
+          console.log('Candidate: Added ICE candidate successfully');
+        }
+      } catch (error) {
+        console.error('Candidate: Error adding ICE candidate:', error);
+      }
     });
 
     socket.on('chat-message', (message) => {
@@ -407,15 +434,30 @@ const CandidateRoom = () => {
 
   const handleOffer = async (offer) => {
     try {
+      console.log('Candidate: Handling offer from interviewer...');
+
+      if (!peerConnectionRef.current) {
+        console.error('Candidate: No peer connection available when handling offer!');
+        return;
+      }
+
+      console.log('Candidate: Setting remote description...');
       await peerConnectionRef.current.setRemoteDescription(offer);
+
+      console.log('Candidate: Creating answer...');
       const answer = await peerConnectionRef.current.createAnswer();
+
+      console.log('Candidate: Setting local description...');
       await peerConnectionRef.current.setLocalDescription(answer);
 
       if (socket) {
+        console.log('Candidate: Sending answer to interviewer');
         socket.emit('answer', answer);
       }
+
+      console.log('Candidate: Successfully handled offer and sent answer');
     } catch (error) {
-      console.error('Error handling offer:', error);
+      console.error('Candidate: Error handling offer:', error);
     }
   };
 
