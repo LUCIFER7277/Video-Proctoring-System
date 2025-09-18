@@ -1,18 +1,21 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   server: {
     port: 3000,
     strictPort: true, // Force port 3000, fail if unavailable
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        secure: false
+    // Only use proxy in development mode
+    ...(mode === 'development' && {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+          secure: false
+        }
       }
-    }
+    })
   },
   define: {
     global: 'globalThis'
@@ -34,4 +37,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

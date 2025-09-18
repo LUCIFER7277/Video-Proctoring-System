@@ -173,7 +173,7 @@ const EnhancedInterview = () => {
       console.log('Loading interview data for session:', sessionId);
 
       try {
-        const response = await axios.get(`http://localhost:8000/api/interviews/${sessionId}`, {
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/interviews/${sessionId}`, {
           timeout: 5000
         });
 
@@ -210,7 +210,7 @@ const EnhancedInterview = () => {
 
   const initializeSocket = () => {
     try {
-      const newSocket = io('http://localhost:8000', {
+      const newSocket = io(import.meta.env.VITE_SOCKET_URL, {
         timeout: 5000,
         reconnection: true,
         reconnectionAttempts: 3,

@@ -81,7 +81,7 @@ const Interview = () => {
   };
 
   const initializeSocket = () => {
-    const newSocket = io('http://localhost:8000');
+    const newSocket = io(import.meta.env.VITE_SOCKET_URL);
     setSocket(newSocket);
 
     newSocket.emit('join-interview', sessionId);
