@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -41,8 +42,37 @@ const Login = () => {
     setError('');
 
     try {
-      // Generate session ID if not provided
-      const sessionId = formData.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      let sessionId;
+
+      if (selectedRole === 'interviewer') {
+        // For interviewer: Create new interview session in database
+        console.log('Creating new interview session...');
+
+        const interviewData = {
+          candidateName: 'Candidate', // Will be updated when candidate joins
+          candidateEmail: formData.email, // Use interviewer email as fallback
+          interviewerName: formData.name
+        };
+
+        const response = await axios.post(
+          `${import.meta.env.VITE_API_URL}/interviews`,
+          interviewData
+        );
+
+        if (response.data.success) {
+          sessionId = response.data.sessionId;
+          console.log('Created interview session:', sessionId);
+        } else {
+          throw new Error('Failed to create interview session');
+        }
+      } else {
+        // For candidate: Use provided session ID or generate temporary one
+        sessionId = formData.sessionId;
+        if (!sessionId) {
+          setError('Please enter a valid session ID to join as candidate');
+          return;
+        }
+      }
 
       // Store user info in sessionStorage
       const userInfo = {
@@ -294,19 +324,33 @@ const Login = () => {
               />
             </div>
 
-            <div style={styles.formGroup}>
-              <label style={styles.label}>
-                Session ID <span style={styles.optional}>(optional)</span>
-              </label>
-              <input
-                type="text"
-                name="sessionId"
-                value={formData.sessionId}
-                onChange={handleInputChange}
-                placeholder="Leave empty to generate automatically"
-                style={styles.input}
-              />
-            </div>
+            {selectedRole === 'candidate' && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>
+                  Session ID *
+                </label>
+                <input
+                  type="text"
+                  name="sessionId"
+                  value={formData.sessionId}
+                  onChange={handleInputChange}
+                  placeholder="Enter session ID provided by interviewer"
+                  style={styles.input}
+                  required
+                />
+              </div>
+            )}
+
+            {selectedRole === 'interviewer' && (
+              <div style={{...styles.formGroup, background: '#e8f5e8', padding: '15px', borderRadius: '8px', border: '1px solid #27ae60'}}>
+                <div style={{color: '#27ae60', fontWeight: 'bold', marginBottom: '8px'}}>
+                  ✅ New Interview Session
+                </div>
+                <div style={{color: '#666', fontSize: '14px'}}>
+                  A unique session ID will be generated automatically for you to share with the candidate.
+                </div>
+              </div>
+            )}
 
             <button
               type="submit"
