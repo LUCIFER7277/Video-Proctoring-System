@@ -99,6 +99,7 @@ const CandidateRoom = () => {
   const remoteVideoRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const chatRef = useRef(null);
+  const pendingIceCandidatesRef = useRef([]);
 
   // WebRTC configuration - using enhanced config
   const rtcConfiguration = logWebRTCConfig();
@@ -257,9 +258,19 @@ const CandidateRoom = () => {
     socket.on('ice-candidate', async (candidate) => {
       try {
         console.log('Candidate: Received ICE candidate from interviewer');
-        if (peerConnectionRef.current) {
+
+        if (!peerConnectionRef.current) {
+          console.warn('Candidate: No peer connection, ignoring ICE candidate');
+          return;
+        }
+
+        // Check if remote description is set
+        if (peerConnectionRef.current.remoteDescription) {
           await peerConnectionRef.current.addIceCandidate(candidate);
           console.log('Candidate: Added ICE candidate successfully');
+        } else {
+          console.log('Candidate: Remote description not set, queuing ICE candidate');
+          pendingIceCandidatesRef.current.push(candidate);
         }
       } catch (error) {
         console.error('Candidate: Error adding ICE candidate:', error);
@@ -443,6 +454,19 @@ const CandidateRoom = () => {
 
       console.log('Candidate: Setting remote description...');
       await peerConnectionRef.current.setRemoteDescription(offer);
+
+      // Process any pending ICE candidates
+      console.log(`Candidate: Processing ${pendingIceCandidatesRef.current.length} pending ICE candidates`);
+      for (const candidate of pendingIceCandidatesRef.current) {
+        try {
+          await peerConnectionRef.current.addIceCandidate(candidate);
+          console.log('Candidate: Added pending ICE candidate');
+        } catch (error) {
+          console.error('Candidate: Error adding pending ICE candidate:', error);
+        }
+      }
+      // Clear the pending candidates queue
+      pendingIceCandidatesRef.current = [];
 
       console.log('Candidate: Creating answer...');
       const answer = await peerConnectionRef.current.createAnswer();

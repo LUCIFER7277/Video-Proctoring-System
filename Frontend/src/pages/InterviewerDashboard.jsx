@@ -51,6 +51,7 @@ const InterviewerDashboard = () => {
   const peerConnectionRef = useRef(null);
   const detectionCanvasRef = useRef(null);
   const chatRef = useRef(null);
+  const pendingIceCandidatesRef = useRef([]);
 
   // Services
   const focusServiceRef = useRef(new FocusDetectionService());
@@ -168,6 +169,18 @@ const InterviewerDashboard = () => {
         console.log('Interviewer: Setting remote description with answer...');
         await peerConnectionRef.current.setRemoteDescription(answer);
         console.log('Interviewer: Successfully set remote description');
+
+        // Process any pending ICE candidates
+        console.log(`Interviewer: Processing ${pendingIceCandidatesRef.current.length} pending ICE candidates`);
+        for (const candidate of pendingIceCandidatesRef.current) {
+          try {
+            await peerConnectionRef.current.addIceCandidate(candidate);
+            console.log('Interviewer: Added pending ICE candidate successfully');
+          } catch (err) {
+            console.error('Interviewer: Error adding pending ICE candidate:', err);
+          }
+        }
+        pendingIceCandidatesRef.current = [];
       } catch (error) {
         console.error('Interviewer: Error handling answer:', error);
       }
@@ -176,9 +189,19 @@ const InterviewerDashboard = () => {
     socket.on('ice-candidate', async (candidate) => {
       try {
         console.log('Interviewer: Received ICE candidate from candidate');
-        if (peerConnectionRef.current) {
+
+        if (!peerConnectionRef.current) {
+          console.warn('Interviewer: No peer connection, ignoring ICE candidate');
+          return;
+        }
+
+        // Check if remote description is set
+        if (peerConnectionRef.current.remoteDescription) {
           await peerConnectionRef.current.addIceCandidate(candidate);
           console.log('Interviewer: Added ICE candidate successfully');
+        } else {
+          console.log('Interviewer: Remote description not set, queuing ICE candidate');
+          pendingIceCandidatesRef.current.push(candidate);
         }
       } catch (error) {
         console.error('Interviewer: Error adding ICE candidate:', error);
