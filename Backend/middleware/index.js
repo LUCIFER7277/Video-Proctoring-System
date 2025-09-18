@@ -119,6 +119,7 @@ const createGeneralAPIRateLimit = () => {
 // CORS configuration
 const getAllowedOrigins = () => {
   const defaultOrigins = [
+    "https://video-proctoring-system1.netlify.app/",
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3002",
