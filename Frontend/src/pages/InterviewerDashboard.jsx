@@ -52,6 +52,7 @@ const InterviewerDashboard = () => {
   const detectionCanvasRef = useRef(null);
   const chatRef = useRef(null);
   const pendingIceCandidatesRef = useRef([]);
+  const isCallingRef = useRef(false);
 
   // Services
   const focusServiceRef = useRef(new FocusDetectionService());
@@ -142,8 +143,23 @@ const InterviewerDashboard = () => {
       setCandidateConnected(true);
       setCandidateInfo(candidateData);
 
-      // Initiate WebRTC connection
-      initiateCall();
+      // Wait a moment for candidate to set up their peer connection
+      setTimeout(() => {
+        if (peerConnectionRef.current && localStream) {
+          console.log('Initiating WebRTC call after candidate setup delay...');
+          initiateCall();
+        } else {
+          console.warn('Peer connection or local stream not ready yet');
+        }
+      }, 1000);
+    });
+
+    socket.on('candidate-ready', () => {
+      console.log('Candidate is ready for WebRTC connection');
+      if (peerConnectionRef.current && localStream && candidateConnected) {
+        console.log('Initiating WebRTC call after candidate ready signal...');
+        initiateCall();
+      }
     });
 
     socket.on('candidate-left', () => {
@@ -322,6 +338,12 @@ const InterviewerDashboard = () => {
   };
 
   const initiateCall = async () => {
+    if (isCallingRef.current) {
+      console.log('Call already in progress, skipping...');
+      return;
+    }
+
+    isCallingRef.current = true;
     try {
       console.log('Creating WebRTC offer...');
 
@@ -356,6 +378,8 @@ const InterviewerDashboard = () => {
           console.error('Retry failed:', retryError);
         }
       }
+    } finally {
+      isCallingRef.current = false;
     }
   };
 
@@ -934,6 +958,7 @@ const InterviewerDashboard = () => {
                       ref={remoteVideoRef}
                       style={styles.video}
                       autoPlay
+                      muted
                       playsInline
                     />
                     <canvas

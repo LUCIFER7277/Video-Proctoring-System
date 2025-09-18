@@ -89,6 +89,12 @@ const configureSocket = (server) => {
       socket.to(socket.sessionId).emit('ice-candidate', candidate);
     });
 
+    // Candidate ready signal
+    socket.on('candidate-ready', (data) => {
+      console.log('Candidate ready for WebRTC in session:', data.sessionId);
+      socket.to(data.sessionId).emit('candidate-ready', data);
+    });
+
     // Chat messaging
     socket.on('chat-message', (message) => {
       console.log('Relaying chat message:', message);

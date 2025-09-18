@@ -131,6 +131,12 @@ const CandidateRoom = () => {
     if (localStream && socket && !peerConnectionRef.current) {
       console.log('Candidate: Local stream available, initializing peer connection...');
       initializePeerConnection();
+
+      // Signal that candidate is ready for WebRTC
+      setTimeout(() => {
+        console.log('Candidate: Signaling ready for WebRTC...');
+        socket.emit('candidate-ready', { sessionId });
+      }, 500);
     }
   }, [localStream, socket]);
 
@@ -1195,6 +1201,7 @@ const CandidateRoom = () => {
               ref={remoteVideoRef}
               style={styles.remoteVideo}
               autoPlay
+              muted
               playsInline
             />
           ) : (
