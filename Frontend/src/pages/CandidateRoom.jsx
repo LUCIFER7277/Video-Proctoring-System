@@ -240,10 +240,13 @@ const CandidateRoom = () => {
     });
 
     socket.on('chat-message', (message) => {
-      setMessages(prev => [...prev, {
-        ...message,
-        timestamp: new Date(message.timestamp)
-      }]);
+      // Only add message if it's from interviewer (avoid duplicate of our own messages)
+      if (message.role !== 'candidate') {
+        setMessages(prev => [...prev, {
+          ...message,
+          timestamp: new Date(message.timestamp)
+        }]);
+      }
     });
 
     socket.on('session-ended', () => {
@@ -522,6 +525,13 @@ const CandidateRoom = () => {
         timestamp: new Date().toISOString()
       };
 
+      // Add message to local state immediately so candidate sees their own message
+      setMessages(prev => [...prev, {
+        ...message,
+        timestamp: new Date(message.timestamp)
+      }]);
+
+      // Send message to interviewer via socket
       socket.emit('chat-message', message);
       setNewMessage('');
     }

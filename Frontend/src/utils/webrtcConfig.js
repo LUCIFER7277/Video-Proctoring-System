@@ -45,16 +45,50 @@ export const getWebRTCConfig = () => {
   return {
     iceServers,
     iceCandidatePoolSize: 10,
-    bundlePolicy: 'max-bundle',
+    bundlePolicy: 'balanced', // Changed from 'max-bundle' to 'balanced' to fix SDP error
     rtcpMuxPolicy: 'require',
     iceTransportPolicy: 'all'
   };
 };
 
+// Fallback WebRTC configuration for compatibility
+export const getFallbackWebRTCConfig = () => {
+  const stunServersEnv = import.meta.env.VITE_STUN_SERVERS;
+  let stunServers = [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun2.l.google.com:19302'
+  ];
+
+  if (stunServersEnv) {
+    stunServers = stunServersEnv.split(',').map(server => server.trim()).slice(0, 3); // Use only first 3 for fallback
+  }
+
+  return {
+    iceServers: stunServers.map(server => ({
+      urls: server.startsWith('stun:') ? server : `stun:${server}`
+    })),
+    iceCandidatePoolSize: 5 // Reduced for compatibility
+  };
+};
+
 // Additional WebRTC utilities
 export const createPeerConnection = (onTrack, onIceCandidate, onConnectionStateChange) => {
-  const config = getWebRTCConfig();
-  const peerConnection = new RTCPeerConnection(config);
+  let config;
+  let peerConnection;
+
+  try {
+    // Try with enhanced configuration first
+    config = getWebRTCConfig();
+    peerConnection = new RTCPeerConnection(config);
+    console.log('Created peer connection with enhanced config');
+  } catch (error) {
+    console.warn('Enhanced config failed, using fallback:', error);
+    // Fall back to basic configuration
+    config = getFallbackWebRTCConfig();
+    peerConnection = new RTCPeerConnection(config);
+    console.log('Created peer connection with fallback config');
+  }
 
   if (onTrack) {
     peerConnection.ontrack = onTrack;

@@ -144,10 +144,13 @@ const InterviewerDashboard = () => {
     });
 
     socket.on('chat-message', (message) => {
-      setMessages(prev => [...prev, {
-        ...message,
-        timestamp: new Date(message.timestamp)
-      }]);
+      // Only add message if it's from candidate (avoid duplicate of our own messages)
+      if (message.role !== 'interviewer') {
+        setMessages(prev => [...prev, {
+          ...message,
+          timestamp: new Date(message.timestamp)
+        }]);
+      }
     });
 
     // Real-time monitoring events
@@ -236,14 +239,39 @@ const InterviewerDashboard = () => {
 
   const initiateCall = async () => {
     try {
-      const offer = await peerConnectionRef.current.createOffer();
+      console.log('Creating WebRTC offer...');
+
+      // Create offer with specific constraints to avoid bundle issues
+      const offer = await peerConnectionRef.current.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        iceRestart: false
+      });
+
+      console.log('Setting local description...');
       await peerConnectionRef.current.setLocalDescription(offer);
 
       if (socket) {
+        console.log('Sending offer to candidate');
         socket.emit('offer', offer);
       }
     } catch (error) {
       console.error('Error creating offer:', error);
+
+      // Try with simplified configuration if first attempt fails
+      if (error.name === 'OperationError') {
+        console.log('Retrying with simplified offer configuration...');
+        try {
+          const simpleOffer = await peerConnectionRef.current.createOffer();
+          await peerConnectionRef.current.setLocalDescription(simpleOffer);
+
+          if (socket) {
+            socket.emit('offer', simpleOffer);
+          }
+        } catch (retryError) {
+          console.error('Retry failed:', retryError);
+        }
+      }
     }
   };
 
@@ -391,6 +419,13 @@ const InterviewerDashboard = () => {
         timestamp: new Date().toISOString()
       };
 
+      // Add message to local state immediately so interviewer sees their own message
+      setMessages(prev => [...prev, {
+        ...message,
+        timestamp: new Date(message.timestamp)
+      }]);
+
+      // Send message to candidate via socket
       socket.emit('chat-message', message);
       setNewMessage('');
     }
@@ -523,7 +558,7 @@ const InterviewerDashboard = () => {
     },
     videoGrid: {
       display: 'grid',
-      gridTemplateColumns: '2.2fr 1fr',
+      gridTemplateColumns: '3.5fr 0.8fr', // Made candidate bigger (3.5fr) and interviewer smaller (0.8fr)
       gap: '20px',
       height: 'calc(100% - 60px)'
     },
@@ -533,7 +568,8 @@ const InterviewerDashboard = () => {
       borderRadius: isFullscreen ? '0' : '8px',
       overflow: 'hidden',
       boxShadow: isFullscreen ? 'none' : '0 4px 6px rgba(0, 0, 0, 0.1)',
-      border: isFullscreen ? 'none' : '1px solid #374151'
+      border: isFullscreen ? 'none' : '1px solid #374151',
+      minHeight: '400px' // Ensure candidate video has good minimum size
     },
     video: {
       width: '100%',
@@ -565,7 +601,9 @@ const InterviewerDashboard = () => {
       overflow: 'hidden',
       position: 'relative',
       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-      border: '1px solid #374151'
+      border: '1px solid #374151',
+      maxHeight: '300px', // Keep interviewer video compact
+      minHeight: '200px'  // But with a reasonable minimum
     },
     noVideo: {
       display: 'flex',
@@ -584,6 +622,10 @@ const InterviewerDashboard = () => {
       color: '#ccc',
       textAlign: 'center'
     },
+    liveMonitoringSection: {
+      marginTop: '20px',
+      marginBottom: '20px'
+    },
     monitoringSection: {
       flex: 1,
       overflow: 'auto'
@@ -600,7 +642,7 @@ const InterviewerDashboard = () => {
       borderRadius: '20px',
       boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
       border: '1px solid rgba(255, 255, 255, 0.2)',
-      height: '320px',
+      height: '400px', // Increased height since Live Monitoring moved
       display: 'flex',
       flexDirection: 'column'
     },
@@ -855,6 +897,16 @@ const InterviewerDashboard = () => {
             </div>
           </div>
 
+          {/* Live Monitoring - Moved from right panel */}
+          <div style={styles.liveMonitoringSection}>
+            <AlertsMonitor
+              violations={violations}
+              focusStatus={focusStatus}
+              systemStatus={systemStatus}
+              serviceStats={serviceStats}
+            />
+          </div>
+
           {/* Monitoring Dashboard */}
           <div style={styles.monitoringSection}>
             <MonitoringDashboard
@@ -869,13 +921,6 @@ const InterviewerDashboard = () => {
 
         {/* Right Panel */}
         <div style={styles.rightPanel}>
-          {/* Alerts Monitor */}
-          <AlertsMonitor
-            violations={violations}
-            focusStatus={focusStatus}
-            systemStatus={systemStatus}
-            serviceStats={serviceStats}
-          />
 
           {/* Chat Section */}
           <div style={styles.chatSection}>
