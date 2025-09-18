@@ -2,19 +2,31 @@ const socketIo = require('socket.io');
 
 // Socket.IO configuration and handlers
 const configureSocket = (server) => {
+  // Get allowed origins function
+  const getAllowedOrigins = () => {
+    const defaultOrigins = [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002",
+      "http://localhost:5173", // Vite default port
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:3001",
+      "http://127.0.0.1:3002",
+      "http://127.0.0.1:5173"
+    ];
+
+    // Add production frontend URL(s) from environment variable
+    if (process.env.FRONTEND_URL) {
+      const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+      return [...frontendUrls, ...defaultOrigins];
+    }
+
+    return defaultOrigins;
+  };
+
   const io = socketIo(server, {
     cors: {
-      origin: [
-        process.env.FRONTEND_URL || "http://localhost:3000",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://localhost:5173", // Vite default port
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-        "http://127.0.0.1:5173"
-      ],
+      origin: getAllowedOrigins(),
       methods: ["GET", "POST"],
       credentials: true
     }

@@ -117,9 +117,8 @@ const createGeneralAPIRateLimit = () => {
 };
 
 // CORS configuration
-const corsOptions = {
-  origin: [
-    process.env.FRONTEND_URL || "http://localhost:3000",
+const getAllowedOrigins = () => {
+  const defaultOrigins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3002",
@@ -128,7 +127,19 @@ const corsOptions = {
     "http://127.0.0.1:3001",
     "http://127.0.0.1:3002",
     "http://127.0.0.1:5173"
-  ],
+  ];
+
+  // Add production frontend URL(s) from environment variable
+  if (process.env.FRONTEND_URL) {
+    const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+    return [...frontendUrls, ...defaultOrigins];
+  }
+
+  return defaultOrigins;
+};
+
+const corsOptions = {
+  origin: getAllowedOrigins(),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
