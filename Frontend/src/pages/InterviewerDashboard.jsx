@@ -8,6 +8,9 @@ import AlertsMonitor from '../components/AlertsMonitor';
 import FocusDetectionService from '../services/focusDetectionService';
 import ObjectDetectionService from '../services/objectDetectionService';
 
+// Import WebRTC configuration
+import { createPeerConnection, logWebRTCConfig } from '../utils/webrtcConfig';
+
 const InterviewerDashboard = () => {
   const { sessionId } = useParams();
   const navigate = useNavigate();
@@ -53,13 +56,8 @@ const InterviewerDashboard = () => {
   const focusServiceRef = useRef(new FocusDetectionService());
   const objectServiceRef = useRef(new ObjectDetectionService());
 
-  // WebRTC configuration
-  const rtcConfiguration = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
-  };
+  // WebRTC configuration - using enhanced config
+  const rtcConfiguration = logWebRTCConfig();
 
   useEffect(() => {
     // Check if user is logged in as interviewer
@@ -190,42 +188,50 @@ const InterviewerDashboard = () => {
   };
 
   const initializePeerConnection = () => {
-    const peerConnection = new RTCPeerConnection(rtcConfiguration);
+    console.log('Initializing peer connection with enhanced WebRTC config');
+
+    const peerConnection = createPeerConnection(
+      // ontrack handler
+      (event) => {
+        console.log('Received candidate stream');
+        const [candidateStream] = event.streams;
+        setRemoteStream(candidateStream);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = candidateStream;
+        }
+        // Start AI detection on candidate stream
+        startDetection(candidateStream);
+        setSystemStatus(prev => ({ ...prev, webrtcConnection: true }));
+      },
+      // onicecandidate handler
+      (event) => {
+        if (event.candidate && socket) {
+          console.log('Sending ICE candidate to candidate');
+          socket.emit('ice-candidate', event.candidate);
+        }
+      },
+      // onconnectionstatechange handler
+      () => {
+        console.log('WebRTC connection state:', peerConnection.connectionState);
+        const connected = peerConnection.connectionState === 'connected';
+        setSystemStatus(prev => ({ ...prev, webrtcConnection: connected }));
+
+        if (peerConnection.connectionState === 'failed') {
+          console.error('WebRTC connection failed, attempting to restart ICE');
+          peerConnection.restartIce();
+        }
+      }
+    );
+
     peerConnectionRef.current = peerConnection;
 
     // Add local stream
     if (localStream) {
       localStream.getTracks().forEach(track => {
+        console.log('Adding track to peer connection:', track.kind);
         peerConnection.addTrack(track, localStream);
       });
     }
-
-    // Handle remote stream (candidate video)
-    peerConnection.ontrack = (event) => {
-      console.log('Received candidate stream');
-      const [candidateStream] = event.streams;
-      setRemoteStream(candidateStream);
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = candidateStream;
-      }
-
-      // Start AI detection on candidate stream
-      startDetection(candidateStream);
-      setSystemStatus(prev => ({ ...prev, webrtcConnection: true }));
-    };
-
-    // Handle ICE candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate && socket) {
-        socket.emit('ice-candidate', event.candidate);
-      }
-    };
-
-    peerConnection.onconnectionstatechange = () => {
-      console.log('WebRTC connection state:', peerConnection.connectionState);
-      const connected = peerConnection.connectionState === 'connected';
-      setSystemStatus(prev => ({ ...prev, webrtcConnection: connected }));
-    };
   };
 
   const initiateCall = async () => {

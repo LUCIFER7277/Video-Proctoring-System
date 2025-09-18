@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 
+// Import WebRTC configuration
+import { createPeerConnection, logWebRTCConfig } from '../utils/webrtcConfig';
+
 // Professional CSS animations
 const animations = `
   @keyframes fadeInUp {
@@ -97,13 +100,8 @@ const CandidateRoom = () => {
   const peerConnectionRef = useRef(null);
   const chatRef = useRef(null);
 
-  // WebRTC configuration
-  const rtcConfiguration = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
-  };
+  // WebRTC configuration - using enhanced config
+  const rtcConfiguration = logWebRTCConfig();
 
   useEffect(() => {
     // Check if user is logged in
@@ -361,37 +359,47 @@ const CandidateRoom = () => {
   };
 
   const initializePeerConnection = () => {
-    const peerConnection = new RTCPeerConnection(rtcConfiguration);
+    console.log('Candidate: Initializing peer connection with enhanced WebRTC config');
+
+    const peerConnection = createPeerConnection(
+      // ontrack handler
+      (event) => {
+        console.log('Candidate: Received remote stream from interviewer');
+        const [remoteStream] = event.streams;
+        setRemoteStream(remoteStream);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+        }
+      },
+      // onicecandidate handler
+      (event) => {
+        if (event.candidate && socket) {
+          console.log('Candidate: Sending ICE candidate to interviewer');
+          socket.emit('ice-candidate', event.candidate);
+        }
+      },
+      // onconnectionstatechange handler
+      () => {
+        console.log('Candidate: WebRTC connection state:', peerConnection.connectionState);
+        if (peerConnection.connectionState === 'connected') {
+          addNotification('Video connection established with interviewer', 'success');
+        } else if (peerConnection.connectionState === 'failed') {
+          console.error('WebRTC connection failed, attempting to restart ICE');
+          peerConnection.restartIce();
+          addNotification('Connection issue detected, attempting to reconnect...', 'warning');
+        }
+      }
+    );
+
     peerConnectionRef.current = peerConnection;
 
     // Add local stream to peer connection
     if (localStream) {
       localStream.getTracks().forEach(track => {
+        console.log('Candidate: Adding track to peer connection:', track.kind);
         peerConnection.addTrack(track, localStream);
       });
     }
-
-    // Handle remote stream
-    peerConnection.ontrack = (event) => {
-      console.log('Received remote stream');
-      const [remoteStream] = event.streams;
-      setRemoteStream(remoteStream);
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-    };
-
-    // Handle ICE candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate && socket) {
-        socket.emit('ice-candidate', event.candidate);
-      }
-    };
-
-    // Handle connection state changes
-    peerConnection.onconnectionstatechange = () => {
-      console.log('Connection state:', peerConnection.connectionState);
-    };
   };
 
   const handleOffer = async (offer) => {
