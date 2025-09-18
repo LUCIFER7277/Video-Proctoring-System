@@ -5,6 +5,8 @@ const configureSocket = (server) => {
   // Get allowed origins function
   const getAllowedOrigins = () => {
     const defaultOrigins = [
+      "https://video-proctoring-system1.netlify.app",
+      "https://video-proctoring-system01.netlify.app", // Added new Netlify URL
       "http://localhost:3000",
       "http://localhost:3001",
       "http://localhost:3002",
