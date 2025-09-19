@@ -315,7 +315,7 @@ const SystemCheck = () => {
 
         {/* Individual Checks */}
         <div style={styles.checksContainer}>
-          {Object.entries(checks).map(([key, check]) => (
+          {Object.entries(checks || {}).map(([key, check]) => check && (
             <div key={key} style={styles.checkItem}>
               <div style={styles.checkIcon}>
                 {getStatusIcon(check.status)}

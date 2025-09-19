@@ -221,7 +221,7 @@ const WebRTCTest = () => {
                   Network connectivity for WebRTC
                   {testReport.testResults.details.stun && (
                     <div style={styles.detailsList}>
-                      {testReport.testResults.details.stun.map((stun, index) => (
+                      {(testReport.testResults.details.stun || []).map((stun, index) => stun && (
                         <div key={index}>
                           {stun.success ? '✅' : '❌'} {stun.server.replace('stun:', '')}
                         </div>
@@ -256,7 +256,7 @@ const WebRTCTest = () => {
               <div style={styles.recommendations}>
                 <h3 style={{ margin: '0 0 10px 0' }}>💡 Recommendations</h3>
                 <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                  {testReport.recommendations.map((rec, index) => (
+                  {(testReport.recommendations || []).map((rec, index) => rec && (
                     <li key={index} style={{ marginBottom: '5px' }}>
                       {rec}
                     </li>

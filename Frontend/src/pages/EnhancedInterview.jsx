@@ -525,7 +525,7 @@ const EnhancedInterview = () => {
 
       // Remove alert after 10 seconds
       setTimeout(() => {
-        setCurrentAlerts(prev => prev.filter(a => a.id !== alert.id));
+        setCurrentAlerts(prev => (prev || []).filter(a => a && a.id !== alert.id));
       }, 10000);
     }
 
@@ -983,7 +983,7 @@ const EnhancedInterview = () => {
 
             {/* Real-time alerts */}
             <div style={styles.alertsContainer}>
-              {currentAlerts.map(alert => (
+              {(currentAlerts || []).map(alert => alert && (
                 <div key={alert.id} style={styles.alert}>
                   ⚠️ {alert.message}
                 </div>
@@ -1040,7 +1040,7 @@ const EnhancedInterview = () => {
                 ✅ No violations detected
               </p>
             ) : (
-              violations.slice(-10).reverse().map((violation, index) => (
+              (violations || []).slice(-10).reverse().map((violation, index) => violation && (
                 <div key={index} style={styles.violationItem}>
                   <div style={{ fontWeight: 'bold', color: '#e74c3c' }}>
                     {violation.type.replace(/_/g, ' ').toUpperCase()}

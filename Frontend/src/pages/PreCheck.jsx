@@ -38,8 +38,8 @@ const PreCheck = () => {
   const enumerateDevices = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const cameras = devices.filter(device => device.kind === 'videoinput');
-      const microphones = devices.filter(device => device.kind === 'audioinput');
+      const cameras = (devices || []).filter(device => device && device.kind === 'videoinput');
+      const microphones = (devices || []).filter(device => device && device.kind === 'audioinput');
 
       setDeviceInfo({ cameras, microphones });
       console.log('Available devices:', { cameras: cameras.length, microphones: microphones.length });

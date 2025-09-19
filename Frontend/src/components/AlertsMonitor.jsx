@@ -134,7 +134,7 @@ const AlertsMonitor = ({
   };
 
   const acknowledgeAlert = (alertId) => {
-    setAlerts(prev => prev.filter(alert => alert.id !== alertId));
+    setAlerts(prev => (prev || []).filter(alert => alert && alert.id !== alertId));
     onAlertAction('alert_acknowledged', alertId);
   };
 
@@ -192,8 +192,8 @@ const AlertsMonitor = ({
   };
 
   const getThreatLevel = () => {
-    const criticalAlerts = alerts.filter(a => a.severity === 'critical').length;
-    const warningAlerts = alerts.filter(a => a.severity === 'warning').length;
+    const criticalAlerts = (alerts || []).filter(a => a && a.severity === 'critical').length;
+    const warningAlerts = (alerts || []).filter(a => a && a.severity === 'warning').length;
 
     if (criticalAlerts > 2) return { level: 'HIGH', color: '#e74c3c' };
     if (criticalAlerts > 0 || warningAlerts > 3) return { level: 'MEDIUM', color: '#f39c12' };
@@ -424,7 +424,7 @@ const AlertsMonitor = ({
                 ✅ No active alerts
               </div>
             ) : (
-              alerts.map(alert => (
+              (alerts || []).map(alert => alert && (
                 <div
                   key={alert.id}
                   style={{
