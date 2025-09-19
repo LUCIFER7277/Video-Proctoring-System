@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Mic, MicOff, Video, VideoOff, Monitor, Square, Users,
@@ -13,10 +13,12 @@ interface AppState {
   isEndModalOpen: boolean;
   isLoggedOut: boolean;
   isMonitoringMinimized: boolean;
+  monitorPosition: { x: number; y: number };
   setTimer: (time: string) => void;
   setEndModalOpen: (open: boolean) => void;
   setLoggedOut: (out: boolean) => void;
   setMonitoringMinimized: (minimized: boolean) => void;
+  setMonitorPosition: (position: { x: number; y: number }) => void;
 }
 
 const useAppStore = create<AppState>((set) => ({
@@ -24,10 +26,12 @@ const useAppStore = create<AppState>((set) => ({
   isEndModalOpen: false,
   isLoggedOut: false,
   isMonitoringMinimized: false,
+  monitorPosition: { x: window.innerWidth - 400, y: 20 },
   setTimer: (time) => set({ timer: time }),
   setEndModalOpen: (open) => set({ isEndModalOpen: open }),
   setLoggedOut: (out) => set({ isLoggedOut: out }),
   setMonitoringMinimized: (minimized) => set({ isMonitoringMinimized: minimized }),
+  setMonitorPosition: (position) => set({ monitorPosition: position }),
 }));
 
 // Mock data
@@ -105,15 +109,73 @@ const SidebarSection: React.FC<{ title: string; children: React.ReactNode }> = (
 
 // Live monitoring component
 const LiveMonitoring: React.FC = () => {
-  const { isMonitoringMinimized, setMonitoringMinimized } = useAppStore();
+  const { isMonitoringMinimized, setMonitoringMinimized, monitorPosition, setMonitorPosition } = useAppStore();
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const monitorRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    const rect = monitorRef.current?.getBoundingClientRect();
+    if (rect) {
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+    }
+  };
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
+
+    let newX = e.clientX - dragOffset.x;
+    let newY = e.clientY - dragOffset.y;
+
+    // Keep panel within viewport bounds
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    const panelWidth = isMonitoringMinimized ? 320 : 384; // w-80 = 320px, w-96 = 384px
+    const panelHeight = isMonitoringMinimized ? 120 : 500; // approximate heights
+
+    if (newX < 0) newX = 0;
+    if (newY < 0) newY = 0;
+    if (newX > windowWidth - panelWidth) newX = windowWidth - panelWidth;
+    if (newY > windowHeight - panelHeight) newY = windowHeight - panelHeight;
+
+    setMonitorPosition({ x: newX, y: newY });
+  }, [isDragging, dragOffset, isMonitoringMinimized, setMonitorPosition]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, handleMouseMove, handleMouseUp]);
 
   return (
-    <div className={`fixed ${isMonitoringMinimized ? 'bottom-4 right-4' : 'top-4 right-4'}
-                   ${isMonitoringMinimized ? 'w-80' : 'w-96'}
-                   bg-white border border-slate-200 rounded-xl shadow-2xl z-50
-                   transition-all duration-300 ease-in-out`}>
+    <div
+      ref={monitorRef}
+      style={{
+        left: monitorPosition.x,
+        top: monitorPosition.y,
+      }}
+      className={`fixed ${isMonitoringMinimized ? 'w-80' : 'w-96'}
+                 bg-white border border-slate-200 rounded-xl shadow-2xl z-50
+                 transition-all duration-300 ease-in-out ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}>
       {/* Header */}
-      <div className="bg-red-500 text-white px-4 py-3 rounded-t-xl flex items-center justify-between">
+      <div
+        className="bg-red-500 text-white px-4 py-3 rounded-t-xl flex items-center justify-between select-none"
+        onMouseDown={handleMouseDown}
+      >
         <div className="flex items-center gap-2">
           <Shield className="w-5 h-5" />
           <span className="font-semibold">Live Monitoring</span>
@@ -123,6 +185,7 @@ const LiveMonitoring: React.FC = () => {
           <button
             onClick={() => setMonitoringMinimized(!isMonitoringMinimized)}
             className="p-1 hover:bg-red-600 rounded"
+            onMouseDown={(e) => e.stopPropagation()}
           >
             {isMonitoringMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
           </button>
