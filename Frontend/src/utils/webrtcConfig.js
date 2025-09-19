@@ -76,13 +76,13 @@ export const getFallbackWebRTCConfig = () => {
 };
 
 // Additional WebRTC utilities
-export const createPeerConnection = (onTrack, onIceCandidate, onConnectionStateChange) => {
+export const createPeerConnection = async (onTrack, onIceCandidate, onConnectionStateChange) => {
   let config;
   let peerConnection;
 
   try {
     // Try with enhanced configuration first
-    config = getWebRTCConfig();
+    config = await getWebRTCConfig();
     peerConnection = new RTCPeerConnection(config);
     console.log('Created peer connection with enhanced config');
   } catch (error) {
@@ -109,11 +109,11 @@ export const createPeerConnection = (onTrack, onIceCandidate, onConnectionStateC
 };
 
 // Debug WebRTC configuration
-export const logWebRTCConfig = () => {
-  const config = getWebRTCConfig();
+export const logWebRTCConfig = async () => {
+  const config = await getWebRTCConfig();
   console.log('WebRTC Configuration:', config);
-  console.log('STUN Servers:', config.iceServers.filter(server => server.urls.includes('stun')));
-  console.log('TURN Servers:', config.iceServers.filter(server => server.urls.includes('turn')));
+  console.log('STUN Servers:', (config.iceServers || []).filter(server => server.urls && server.urls.includes('stun')));
+  console.log('TURN Servers:', (config.iceServers || []).filter(server => server.urls && server.urls.includes('turn')));
   return config;
 };
 

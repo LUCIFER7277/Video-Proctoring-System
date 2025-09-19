@@ -102,7 +102,20 @@ const CandidateRoom = () => {
   const pendingIceCandidatesRef = useRef([]);
 
   // WebRTC configuration - using enhanced config
-  const rtcConfiguration = logWebRTCConfig();
+  const [rtcConfiguration, setRtcConfiguration] = useState(null);
+
+  useEffect(() => {
+    // Load WebRTC configuration asynchronously
+    const loadWebRTCConfig = async () => {
+      try {
+        const config = await logWebRTCConfig();
+        setRtcConfiguration(config);
+      } catch (error) {
+        console.error('Failed to load WebRTC configuration:', error);
+      }
+    };
+    loadWebRTCConfig();
+  }, []);
 
   useEffect(() => {
     // Check if user is logged in
@@ -130,7 +143,9 @@ const CandidateRoom = () => {
   useEffect(() => {
     if (localStream && socket && !peerConnectionRef.current) {
       console.log('Candidate: Local stream available, initializing peer connection...');
-      initializePeerConnection();
+      initializePeerConnection().catch(error => {
+        console.error('Failed to initialize peer connection:', error);
+      });
 
       // Signal that candidate is ready for WebRTC
       setTimeout(() => {
@@ -405,10 +420,10 @@ const CandidateRoom = () => {
     }
   };
 
-  const initializePeerConnection = () => {
+  const initializePeerConnection = async () => {
     console.log('Candidate: Initializing peer connection with enhanced WebRTC config');
 
-    const peerConnection = createPeerConnection(
+    const peerConnection = await createPeerConnection(
       // ontrack handler
       (event) => {
         console.log('Candidate: Received remote stream from interviewer');

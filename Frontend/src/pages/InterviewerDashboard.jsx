@@ -60,7 +60,20 @@ const InterviewerDashboard = () => {
   const objectServiceRef = useRef(new ObjectDetectionService());
 
   // WebRTC configuration - using enhanced config
-  const rtcConfiguration = logWebRTCConfig();
+  const [rtcConfiguration, setRtcConfiguration] = useState(null);
+
+  useEffect(() => {
+    // Load WebRTC configuration asynchronously
+    const loadWebRTCConfig = async () => {
+      try {
+        const config = await logWebRTCConfig();
+        setRtcConfiguration(config);
+      } catch (error) {
+        console.error('Failed to load WebRTC configuration:', error);
+      }
+    };
+    loadWebRTCConfig();
+  }, []);
 
   useEffect(() => {
     // Check if user is logged in as interviewer
@@ -88,7 +101,9 @@ const InterviewerDashboard = () => {
   useEffect(() => {
     if (localStream && socket && !peerConnectionRef.current) {
       console.log('Local stream available, initializing peer connection...');
-      initializePeerConnection();
+      initializePeerConnection().catch(error => {
+        console.error('Failed to initialize peer connection:', error);
+      });
 
       // Join room now that peer connection is ready
       if (socket.connected && !hasJoinedRoomRef.current) {
@@ -317,10 +332,10 @@ const InterviewerDashboard = () => {
     }
   };
 
-  const initializePeerConnection = () => {
+  const initializePeerConnection = async () => {
     console.log('Initializing peer connection with enhanced WebRTC config');
 
-    const peerConnection = createPeerConnection(
+    const peerConnection = await createPeerConnection(
       // ontrack handler
       (event) => {
         console.log('Received candidate stream');
