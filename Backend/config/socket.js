@@ -67,17 +67,20 @@ const configureSocket = (server) => {
 
     // WebRTC Signaling
     socket.on('offer', (offer) => {
-      console.log('Relaying offer from interviewer to candidate');
+      console.log('📤 Relaying offer from interviewer to candidate in session:', socket.sessionId);
+      console.log('📤 Offer type:', offer?.type, 'SDP length:', offer?.sdp?.length);
       socket.to(socket.sessionId).emit('offer', offer);
     });
 
     socket.on('answer', (answer) => {
-      console.log('Relaying answer from candidate to interviewer');
+      console.log('📤 Relaying answer from candidate to interviewer in session:', socket.sessionId);
+      console.log('📤 Answer type:', answer?.type, 'SDP length:', answer?.sdp?.length);
       socket.to(socket.sessionId).emit('answer', answer);
     });
 
     socket.on('ice-candidate', (candidate) => {
-      console.log('Relaying ICE candidate');
+      console.log('📤 Relaying ICE candidate in session:', socket.sessionId);
+      console.log('📤 ICE candidate type:', candidate?.type, 'protocol:', candidate?.protocol);
       socket.to(socket.sessionId).emit('ice-candidate', candidate);
     });
 

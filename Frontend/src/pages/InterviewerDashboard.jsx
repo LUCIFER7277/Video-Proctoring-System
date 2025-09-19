@@ -338,23 +338,45 @@ const InterviewerDashboard = () => {
     const peerConnection = await createPeerConnection(
       // ontrack handler
       (event) => {
-        console.log('Received candidate stream');
-        console.log('Event streams:', event.streams.length);
-        console.log('Event tracks:', event.track.kind, event.track.readyState);
+        console.log('📹 INTERVIEWER: Received candidate stream');
+        console.log('📹 Event streams:', event.streams.length);
+        console.log('📹 Event tracks:', event.track.kind, event.track.readyState);
+        console.log('📹 Track ID:', event.track.id);
+        console.log('📹 Track enabled:', event.track.enabled);
+        console.log('📹 Track muted:', event.track.muted);
 
         const [candidateStream] = event.streams;
-        console.log('Candidate stream tracks:', candidateStream.getTracks().map(t => `${t.kind}:${t.readyState}`));
+        if (candidateStream) {
+          console.log('📹 Candidate stream ID:', candidateStream.id);
+          console.log('📹 Candidate stream tracks:', candidateStream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
+          console.log('📹 Video tracks count:', candidateStream.getVideoTracks().length);
+          console.log('📹 Audio tracks count:', candidateStream.getAudioTracks().length);
 
-        setRemoteStream(candidateStream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = candidateStream;
-          console.log('Set remote video srcObject');
+          setRemoteStream(candidateStream);
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = candidateStream;
+            console.log('📹 Set remote video srcObject successfully');
+
+            // Add event listeners to video element
+            remoteVideoRef.current.onloadedmetadata = () => {
+              console.log('📹 Remote video metadata loaded');
+            };
+            remoteVideoRef.current.oncanplay = () => {
+              console.log('📹 Remote video can play');
+            };
+            remoteVideoRef.current.onplay = () => {
+              console.log('📹 Remote video started playing');
+            };
+          } else {
+            console.warn('📹 Remote video ref not available');
+          }
+
+          // Start AI detection on candidate stream
+          startDetection(candidateStream);
+          setSystemStatus(prev => ({ ...prev, webrtcConnection: true }));
         } else {
-          console.warn('Remote video ref not available');
+          console.error('📹 No candidate stream received');
         }
-        // Start AI detection on candidate stream
-        startDetection(candidateStream);
-        setSystemStatus(prev => ({ ...prev, webrtcConnection: true }));
       },
       // onicecandidate handler
       (event) => {
@@ -380,13 +402,17 @@ const InterviewerDashboard = () => {
 
     // Add local stream tracks
     if (localStream) {
+      console.log('🎥 INTERVIEWER: Adding local stream tracks to peer connection');
+      console.log('🎥 Local stream ID:', localStream.id);
+      console.log('🎥 Local stream tracks:', localStream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
+
       localStream.getTracks().forEach(track => {
-        console.log('Adding track to peer connection:', track.kind, track.readyState);
+        console.log('🎥 Adding track to peer connection:', track.kind, track.readyState, track.enabled);
         peerConnection.addTrack(track, localStream);
       });
-      console.log(`Added ${localStream.getTracks().length} tracks to peer connection`);
+      console.log(`🎥 Added ${localStream.getTracks().length} tracks to peer connection`);
     } else {
-      console.warn('No local stream available when initializing peer connection');
+      console.warn('🎥 No local stream available when initializing peer connection');
     }
   };
 

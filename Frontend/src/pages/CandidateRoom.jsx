@@ -426,11 +426,29 @@ const CandidateRoom = () => {
     const peerConnection = await createPeerConnection(
       // ontrack handler
       (event) => {
-        console.log('Candidate: Received remote stream from interviewer');
+        console.log('📹 CANDIDATE: Received remote stream from interviewer');
+        console.log('📹 Event streams:', event.streams.length);
+        console.log('📹 Event tracks:', event.track.kind, event.track.readyState);
+        console.log('📹 Track ID:', event.track.id);
+        console.log('📹 Track enabled:', event.track.enabled);
+        console.log('📹 Track muted:', event.track.muted);
+
         const [remoteStream] = event.streams;
-        setRemoteStream(remoteStream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
+        if (remoteStream) {
+          console.log('📹 Remote stream ID:', remoteStream.id);
+          console.log('📹 Remote stream tracks:', remoteStream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
+          console.log('📹 Video tracks count:', remoteStream.getVideoTracks().length);
+          console.log('📹 Audio tracks count:', remoteStream.getAudioTracks().length);
+
+          setRemoteStream(remoteStream);
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteStream;
+            console.log('📹 Set remote video srcObject successfully');
+          } else {
+            console.warn('📹 Remote video ref not available');
+          }
+        } else {
+          console.error('📹 No remote stream received');
         }
       },
       // onicecandidate handler
@@ -457,10 +475,17 @@ const CandidateRoom = () => {
 
     // Add local stream to peer connection
     if (localStream) {
+      console.log('🎥 CANDIDATE: Adding local stream tracks to peer connection');
+      console.log('🎥 Local stream ID:', localStream.id);
+      console.log('🎥 Local stream tracks:', localStream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
+
       localStream.getTracks().forEach(track => {
-        console.log('Candidate: Adding track to peer connection:', track.kind);
+        console.log('🎥 Adding track to peer connection:', track.kind, track.readyState, track.enabled);
         peerConnection.addTrack(track, localStream);
       });
+      console.log(`🎥 Added ${localStream.getTracks().length} tracks to peer connection`);
+    } else {
+      console.warn('🎥 No local stream available when initializing peer connection');
     }
   };
 
