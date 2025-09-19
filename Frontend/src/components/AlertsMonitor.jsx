@@ -11,7 +11,11 @@ const AlertsMonitor = ({
   const [isMinimized, setIsMinimized] = useState(false);
   const [alertHistory, setAlertHistory] = useState([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [position, setPosition] = useState({ x: 20, y: 20 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const audioRef = useRef(null);
+  const containerRef = useRef(null);
 
   // Alert sound setup
   useEffect(() => {
@@ -68,7 +72,10 @@ const AlertsMonitor = ({
 
     setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Keep last 10 alerts
 
-    // Sound disabled for smooth interview process
+    // Play sound if enabled
+    if (soundEnabled && alert.severity !== 'info') {
+      playAlertSound(alert.severity);
+    }
 
     // Auto-dismiss info alerts after 5 seconds
     if (alert.severity === 'info') {
@@ -198,11 +205,61 @@ const AlertsMonitor = ({
     return { level: 'NORMAL', color: '#27ae60' };
   };
 
+  // Drag functionality
+  const handleMouseDown = (e) => {
+    if (e.target.closest('button')) return; // Don't drag if clicking buttons
+    
+    setIsDragging(true);
+    const rect = containerRef.current.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+    
+    // Prevent text selection while dragging
+    e.preventDefault();
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging) return;
+
+    const newX = e.clientX - dragOffset.x;
+    const newY = e.clientY - dragOffset.y;
+
+    // Keep within viewport bounds
+    const maxX = window.innerWidth - (isMinimized ? 300 : 400);
+    const maxY = window.innerHeight - 100; // Leave some space at bottom
+
+    setPosition({
+      x: Math.max(0, Math.min(newX, maxX)),
+      y: Math.max(0, Math.min(newY, maxY))
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // Add global mouse event listeners for dragging
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = 'none'; // Prevent text selection
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging, dragOffset]);
+
   const styles = {
     container: {
       position: 'fixed',
-      top: '20px',
-      right: '20px',
+      left: `${position.x}px`,
+      top: `${position.y}px`,
       width: isMinimized ? '300px' : '400px',
       maxHeight: '80vh',
       background: 'white',
@@ -210,7 +267,8 @@ const AlertsMonitor = ({
       boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
       zIndex: 1000,
       border: '2px solid #e74c3c',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      cursor: isDragging ? 'grabbing' : 'grab'
     },
     header: {
       background: 'linear-gradient(135deg, #e74c3c, #c0392b)',
@@ -345,7 +403,11 @@ const AlertsMonitor = ({
   const threatLevel = getThreatLevel();
 
   return (
-    <div style={styles.container}>
+    <div 
+      ref={containerRef}
+      style={styles.container}
+      onMouseDown={handleMouseDown}
+    >
       <div style={styles.header}>
         <h3 style={styles.title}>
           🚨 Live Monitoring ({alerts.length})
