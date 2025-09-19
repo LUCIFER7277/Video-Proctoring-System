@@ -577,102 +577,119 @@ const InterviewerDashboard = () => {
   const styles = {
     container: {
       height: '100vh',
-      background: '#f8fafc',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+      fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      position: 'relative'
     },
-    header: {
-      background: '#ffffff',
-      padding: '20px 32px',
+    sidebar: {
+      position: 'fixed',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: '80px',
+      background: 'rgba(255, 255, 255, 0.1)',
+      backdropFilter: 'blur(20px)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      padding: '20px 0',
+      zIndex: 100
+    },
+    sidebarIcon: {
+      width: '48px',
+      height: '48px',
+      borderRadius: '12px',
+      background: 'rgba(255, 255, 255, 0.2)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'white',
+      marginBottom: '16px',
+      cursor: 'pointer',
+      transition: 'all 0.3s ease'
+    },
+    mainContent: {
+      marginLeft: '80px',
+      height: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      position: 'relative'
+    },
+    topBar: {
+      position: 'absolute',
+      top: '20px',
+      left: '20px',
+      right: '20px',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      borderBottom: '1px solid #e2e8f0',
-      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+      zIndex: 50,
+      height: '60px'
     },
-    title: {
-      fontSize: '24px',
-      fontWeight: '600',
-      color: '#1a202c',
-      margin: 0,
-      letterSpacing: '-0.025em'
-    },
-    headerControls: {
+    sessionInfo: {
+      background: 'rgba(255, 255, 255, 0.1)',
+      backdropFilter: 'blur(20px)',
+      borderRadius: '12px',
+      padding: '12px 20px',
+      color: 'white',
       display: 'flex',
-      gap: '16px',
-      alignItems: 'center'
+      alignItems: 'center',
+      gap: '12px'
     },
-    statusBadge: {
-      padding: '8px 16px',
-      borderRadius: '6px',
+    timer: {
+      background: 'rgba(255, 255, 255, 0.2)',
+      borderRadius: '8px',
+      padding: '8px 12px',
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      fontWeight: 'bold'
+    },
+    participantName: {
       fontSize: '14px',
-      fontWeight: '500',
-      background: candidateConnected ? '#f0fff4' : '#fef2f2',
-      border: `1px solid ${candidateConnected ? '#10b981' : '#ef4444'}`,
-      color: candidateConnected ? '#065f46' : '#991b1b'
+      opacity: 0.9
     },
-    mainGrid: {
+    statusIndicator: {
+      width: '8px',
+      height: '8px',
+      borderRadius: '50%',
+      background: candidateConnected ? '#4ade80' : '#ef4444'
+    },
+    videoContainer: {
       flex: 1,
-      display: 'grid',
-      gridTemplateColumns: '1fr 380px',
-      gap: '24px',
-      padding: '24px',
-      overflow: 'hidden'
-    },
-    leftPanel: {
+      padding: '100px 20px 20px 20px',
       display: 'flex',
       flexDirection: 'column',
-      gap: '24px',
-      overflow: 'hidden'
+      gap: '20px'
     },
-    videoSection: {
-      background: '#ffffff',
-      borderRadius: '12px',
-      padding: '24px',
-      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-      border: '1px solid #e2e8f0',
-      height: '450px'
-    },
-    videoSectionTitle: {
-      fontSize: '18px',
-      fontWeight: '600',
-      color: '#1a202c',
-      margin: '0 0 20px 0',
-      borderBottom: '1px solid #e2e8f0',
-      paddingBottom: '12px'
-    },
-    videoGrid: {
-      display: 'grid',
-      gridTemplateColumns: '3.5fr 0.8fr', // Made candidate bigger (3.5fr) and interviewer smaller (0.8fr)
-      gap: '20px',
-      height: 'calc(100% - 60px)'
+    mainVideoArea: {
+      flex: 1,
+      position: 'relative',
+      borderRadius: '20px',
+      overflow: 'hidden',
+      background: '#1f2937',
+      boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
     },
     candidateVideo: {
-      position: 'relative',
-      background: '#1f2937',
-      borderRadius: isFullscreen ? '0' : '8px',
-      overflow: 'hidden',
-      boxShadow: isFullscreen ? 'none' : '0 4px 6px rgba(0, 0, 0, 0.1)',
-      border: isFullscreen ? 'none' : '1px solid #374151',
-      minHeight: '400px' // Ensure candidate video has good minimum size
-    },
-    video: {
       width: '100%',
       height: '100%',
       objectFit: 'cover'
     },
     videoLabel: {
       position: 'absolute',
-      top: '12px',
-      left: '12px',
-      background: 'rgba(0,0,0,0.8)',
+      bottom: '20px',
+      left: '20px',
+      background: 'rgba(0,0,0,0.7)',
       color: 'white',
-      padding: '6px 12px',
-      borderRadius: '6px',
-      fontSize: '12px',
-      fontWeight: '500'
+      padding: '8px 16px',
+      borderRadius: '8px',
+      fontSize: '14px',
+      fontWeight: '500',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
     },
     detectionCanvas: {
       position: 'absolute',
@@ -682,15 +699,36 @@ const InterviewerDashboard = () => {
       height: '100%',
       pointerEvents: 'none'
     },
-    interviewerVideo: {
-      background: '#1f2937',
-      borderRadius: '8px',
+    participantGrid: {
+      display: 'flex',
+      gap: '12px',
+      height: '140px'
+    },
+    participantVideo: {
+      width: '200px',
+      height: '140px',
+      borderRadius: '12px',
       overflow: 'hidden',
       position: 'relative',
-      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-      border: '1px solid #374151',
-      maxHeight: '300px', // Keep interviewer video compact
-      minHeight: '200px'  // But with a reasonable minimum
+      background: '#1f2937',
+      boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
+    },
+    participantVideoElement: {
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
+      transform: 'scaleX(-1)' // Mirror interviewer video
+    },
+    participantLabel: {
+      position: 'absolute',
+      bottom: '8px',
+      left: '8px',
+      background: 'rgba(0,0,0,0.7)',
+      color: 'white',
+      padding: '4px 8px',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontWeight: '500'
     },
     noVideo: {
       display: 'flex',
@@ -709,27 +747,54 @@ const InterviewerDashboard = () => {
       color: '#ccc',
       textAlign: 'center'
     },
-    liveMonitoringSection: {
-      marginTop: '20px',
-      marginBottom: '20px'
-    },
-    monitoringSection: {
-      flex: 1,
-      overflow: 'auto'
-    },
-    rightPanel: {
+    controlBar: {
+      position: 'absolute',
+      bottom: '20px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      background: 'rgba(255, 255, 255, 0.1)',
+      backdropFilter: 'blur(20px)',
+      borderRadius: '20px',
+      padding: '16px 24px',
       display: 'flex',
-      flexDirection: 'column',
-      gap: '24px',
-      overflow: 'hidden'
+      gap: '16px',
+      alignItems: 'center',
+      zIndex: 50
     },
-    chatSection: {
+    controlButton: {
+      width: '48px',
+      height: '48px',
+      borderRadius: '12px',
+      border: 'none',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '18px',
+      transition: 'all 0.3s ease',
+      background: 'rgba(255, 255, 255, 0.2)',
+      color: 'white'
+    },
+    recordButton: {
+      background: '#ef4444',
+      color: 'white'
+    },
+    endButton: {
+      background: '#ef4444',
+      color: 'white'
+    },
+    floatingChat: {
+      position: 'fixed',
+      top: '100px',
+      right: '20px',
+      width: '350px',
+      height: '500px',
       background: 'rgba(255, 255, 255, 0.95)',
       backdropFilter: 'blur(20px)',
       borderRadius: '20px',
       boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
       border: '1px solid rgba(255, 255, 255, 0.2)',
-      height: '400px', // Increased height since Live Monitoring moved
+      zIndex: 200,
       display: 'flex',
       flexDirection: 'column'
     },
@@ -795,50 +860,6 @@ const InterviewerDashboard = () => {
       transition: 'all 0.3s ease',
       boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)'
     },
-    controlsSection: {
-      background: 'rgba(255, 255, 255, 0.95)',
-      backdropFilter: 'blur(20px)',
-      borderRadius: '20px',
-      padding: '20px',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
-      border: '1px solid rgba(255, 255, 255, 0.2)'
-    },
-    controlsTitle: {
-      fontSize: '16px',
-      fontWeight: '600',
-      color: '#2d3748',
-      margin: '0 0 16px 0',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px'
-    },
-    controlButtons: {
-      display: 'flex',
-      gap: '12px',
-      justifyContent: 'center'
-    },
-    button: {
-      padding: '14px 24px',
-      borderRadius: '12px',
-      border: 'none',
-      fontWeight: '600',
-      cursor: 'pointer',
-      fontSize: '14px',
-      transition: 'all 0.3s ease',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px'
-    },
-    endButton: {
-      background: 'linear-gradient(135deg, #f44336, #e53935)',
-      color: 'white',
-      boxShadow: '0 4px 15px rgba(244, 67, 54, 0.4)'
-    },
-    reportButton: {
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white',
-      boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)'
-    },
     fullscreenOverlay: {
       position: 'fixed',
       top: 0,
@@ -864,25 +885,6 @@ const InterviewerDashboard = () => {
       gap: '12px',
       zIndex: 10001
     },
-    fullscreenButton: {
-      position: 'absolute',
-      bottom: '12px',
-      right: '12px',
-      width: '40px',
-      height: '40px',
-      borderRadius: '8px',
-      border: '1px solid rgba(255, 255, 255, 0.3)',
-      background: 'rgba(0, 0, 0, 0.8)',
-      color: 'white',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '16px',
-      fontWeight: '600',
-      transition: 'all 0.2s ease',
-      zIndex: 20
-    },
     exitButton: {
       padding: '8px 16px',
       borderRadius: '6px',
@@ -898,170 +900,152 @@ const InterviewerDashboard = () => {
 
   return (
     <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <h1 style={styles.title}>
-          Interviewer Dashboard - Session {sessionId}
-        </h1>
-        <div style={styles.headerControls}>
-          <div style={styles.statusBadge}>
-            {candidateConnected ? 'Candidate Connected' : 'Waiting for Candidate'}
-          </div>
-          {candidateInfo && (
-            <span style={{ fontSize: '14px', color: '#666' }}>
-              {candidateInfo.name}
-            </span>
-          )}
-        </div>
+      {/* Left Sidebar */}
+      <div style={styles.sidebar}>
+        <div style={styles.sidebarIcon}>🏠</div>
+        <div style={styles.sidebarIcon}>📹</div>
+        <div style={styles.sidebarIcon}>👥</div>
+        <div style={styles.sidebarIcon}>⚙️</div>
+        <div style={styles.sidebarIcon}>❓</div>
+        <div style={styles.sidebarIcon} onClick={() => navigate('/')}>🚪</div>
       </div>
 
       {/* Main Content */}
-      <div style={styles.mainGrid}>
-        {/* Left Panel */}
-        <div style={styles.leftPanel}>
-          {/* Video Section */}
-          <div style={styles.videoSection}>
-            <div style={styles.videoSectionTitle}>
-              Live Video Feed
+      <div style={styles.mainContent}>
+        {/* Top Bar */}
+        <div style={styles.topBar}>
+          <div style={styles.sessionInfo}>
+            <div style={styles.timer}>24:01:45</div>
+            <div style={styles.participantName}>
+              {candidateInfo ? candidateInfo.name : 'Waiting for candidate...'}
             </div>
-            <div style={styles.videoGrid}>
-              {/* Candidate Video */}
-              <div style={styles.candidateVideo}>
+            <div style={styles.statusIndicator}></div>
+          </div>
+        </div>
+
+        {/* Video Container */}
+        <div style={styles.videoContainer}>
+          {/* Main Candidate Video */}
+          <div style={styles.mainVideoArea}>
+            {remoteStream ? (
+              <>
+                <video
+                  ref={remoteVideoRef}
+                  style={styles.candidateVideo}
+                  autoPlay
+                  playsInline
+                />
+                <canvas
+                  ref={detectionCanvasRef}
+                  style={styles.detectionCanvas}
+                />
                 <div style={styles.videoLabel}>
-                  Candidate {candidateInfo ? `- ${candidateInfo.name}` : ''}
+                  <div style={styles.statusIndicator}></div>
+                  {candidateInfo ? candidateInfo.name : 'Candidate'}
                 </div>
-
-                {remoteStream ? (
-                  <>
-                    <video
-                      ref={remoteVideoRef}
-                      style={styles.video}
-                      autoPlay
-                      playsInline
-                    />
-                    <canvas
-                      ref={detectionCanvasRef}
-                      style={styles.detectionCanvas}
-                    />
-                  </>
-                ) : (
-                  <div style={styles.noVideo}>
-                    👤
-                    <div style={styles.noVideoText}>Waiting for candidate</div>
-                  </div>
-                )}
-
-                {/* Fullscreen Button */}
-                {remoteStream && (
-                  <button
-                    style={styles.fullscreenButton}
-                    onClick={toggleFullscreen}
-                    title="Enter Fullscreen"
-                  >
-                    ⛶
-                  </button>
-                )}
+              </>
+            ) : (
+              <div style={styles.noVideo}>
+                👤
+                <div style={styles.noVideoText}>Waiting for candidate</div>
               </div>
+            )}
+          </div>
 
-              {/* Interviewer Video */}
-              <div style={styles.interviewerVideo}>
-                <div style={styles.videoLabel}>You</div>
-                {localStream ? (
-                  <video
-                    ref={localVideoRef}
-                    style={{...styles.video, transform: 'scaleX(-1)'}}
-                    autoPlay
-                    muted
-                    playsInline
-                  />
-                ) : (
-                  <div style={styles.noVideo}>
-                    📷
-                    <div style={styles.noVideoText}>Camera disabled</div>
-                  </div>
-                )}
-              </div>
+          {/* Participant Grid */}
+          <div style={styles.participantGrid}>
+            <div style={styles.participantVideo}>
+              {localStream ? (
+                <video
+                  ref={localVideoRef}
+                  style={styles.participantVideoElement}
+                  autoPlay
+                  muted
+                  playsInline
+                />
+              ) : (
+                <div style={styles.noVideo}>
+                  📷
+                  <div style={styles.noVideoText}>Camera off</div>
+                </div>
+              )}
+              <div style={styles.participantLabel}>You</div>
             </div>
-          </div>
-
-          {/* Live Monitoring - Moved from right panel */}
-          <div style={styles.liveMonitoringSection}>
-            <AlertsMonitor
-              violations={violations}
-              focusStatus={focusStatus}
-              systemStatus={systemStatus}
-              serviceStats={serviceStats}
-            />
-          </div>
-
-          {/* Monitoring Dashboard */}
-          <div style={styles.monitoringSection}>
-            <MonitoringDashboard
-              violations={violations}
-              focusStatus={focusStatus}
-              systemStatus={systemStatus}
-              serviceStats={serviceStats}
-              sessionId={sessionId}
-            />
           </div>
         </div>
 
-        {/* Right Panel */}
-        <div style={styles.rightPanel}>
-
-          {/* Chat Section */}
-          <div style={styles.chatSection}>
-            <div style={styles.chatHeader}>
-              Communication
-            </div>
-            <div style={styles.chatMessages} ref={chatRef}>
-              {messages.map((message, index) => (
-                <div key={index} style={styles.message}>
-                  <div style={styles.messageHeader}>
-                    {message.sender} • {message.timestamp.toLocaleTimeString()}
-                  </div>
-                  <div style={styles.messageText}>
-                    {message.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div style={styles.chatInput}>
-              <input
-                style={styles.input}
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Send message to candidate..."
-              />
-              <button style={styles.sendButton} onClick={sendMessage}>
-                Send
-              </button>
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div style={styles.controlsSection}>
-            <div style={styles.controlsTitle}>
-              Session Controls
-            </div>
-            <div style={styles.controlButtons}>
-              <button
-                style={{...styles.button, ...styles.reportButton}}
-                onClick={() => navigate(`/report/${sessionId}`)}
-              >
-                View Report
-              </button>
-              <button
-                style={{...styles.button, ...styles.endButton}}
-                onClick={endSession}
-              >
-                End Session
-              </button>
-            </div>
-          </div>
+        {/* Control Bar */}
+        <div style={styles.controlBar}>
+          <button style={styles.controlButton} title="Mute">
+            🎤
+          </button>
+          <button style={styles.controlButton} title="Camera">
+            📹
+          </button>
+          <button style={styles.controlButton} title="Share Screen">
+            📺
+          </button>
+          <button style={{...styles.controlButton, ...styles.recordButton}} title="Record">
+            ⏺
+          </button>
+          <button style={styles.controlButton} title="Breakout Rooms">
+            👥
+          </button>
+          <button style={styles.controlButton} title="Reactions">
+            😊
+          </button>
+          <button style={{...styles.controlButton, ...styles.endButton}} onClick={endSession} title="End Session">
+            📞
+          </button>
         </div>
+      </div>
+
+      {/* Floating Chat Panel */}
+      <div style={styles.floatingChat}>
+        <div style={styles.chatHeader}>
+          💬 Communication
+        </div>
+        <div style={styles.chatMessages} ref={chatRef}>
+          {messages.map((message, index) => (
+            <div key={index} style={styles.message}>
+              <div style={styles.messageHeader}>
+                {message.sender} • {message.timestamp.toLocaleTimeString()}
+              </div>
+              <div style={styles.messageText}>
+                {message.text}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={styles.chatInput}>
+          <input
+            style={styles.input}
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+            placeholder="Write a reply..."
+          />
+          <button style={styles.sendButton} onClick={sendMessage}>
+            ➤
+          </button>
+        </div>
+      </div>
+
+      {/* Floating AlertsMonitor */}
+      <div style={{
+        position: 'fixed',
+        top: '620px',
+        right: '20px',
+        width: '350px',
+        zIndex: 199
+      }}>
+        <AlertsMonitor
+          violations={violations}
+          focusStatus={focusStatus}
+          systemStatus={systemStatus}
+          serviceStats={serviceStats}
+        />
       </div>
 
       {/* Fullscreen Overlay */}
