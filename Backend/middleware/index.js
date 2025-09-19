@@ -119,7 +119,7 @@ const createGeneralAPIRateLimit = () => {
 // CORS configuration
 const getAllowedOrigins = () => {
   const defaultOrigins = [
-  
+    "https://video-proctoring-system-pink.vercel.app",
     "https://video-proctoring-system01.netlify.app"
   ];
 

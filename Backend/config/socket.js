@@ -5,7 +5,8 @@ const configureSocket = (server) => {
   // Get allowed origins function
   const getAllowedOrigins = () => {
     const defaultOrigins = [
-      "https://video-proctoring-system01.netlify.app", 
+      "https://video-proctoring-system-pink.vercel.app",
+      "https://video-proctoring-system01.netlify.app",
     ];
 
     // Add production frontend URL(s) from environment variable
