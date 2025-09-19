@@ -26,14 +26,17 @@ const ReportView = () => {
       // Get interview data
       const interviewResponse = await axios.get(`${API_BASE_URL}/interviews/${sessionId}`);
 
-      if (interviewResponse.data.success) {
-        setInterview(interviewResponse.data.interview);
+      if (interviewResponse.data.success && interviewResponse.data.interview) {
+        const interviewData = interviewResponse.data.interview;
+        setInterview(interviewData);
 
-        // Get violation summary
-        const violationsResponse = await axios.get(`${API_BASE_URL}/violations/summary/${interviewResponse.data.interview._id}`);
+        // Get violation summary only if interview has _id
+        if (interviewData._id) {
+          const violationsResponse = await axios.get(`${API_BASE_URL}/violations/summary/${interviewData._id}`);
 
-        if (violationsResponse.data.success) {
-          setViolationSummary(violationsResponse.data);
+          if (violationsResponse.data.success) {
+            setViolationSummary(violationsResponse.data);
+          }
         }
       } else {
         setError('Interview not found');
