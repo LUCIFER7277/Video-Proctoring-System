@@ -30,6 +30,12 @@ const InterviewerDashboard = () => {
   const [candidateInfo, setCandidateInfo] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Draggable monitoring state
+  const [monitorPosition, setMonitorPosition] = useState({ x: window.innerWidth - 370, y: 620 });
+  const [isDraggingMonitor, setIsDraggingMonitor] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const monitorRef = useRef(null);
+
   // System status
   const [systemStatus, setSystemStatus] = useState({
     focusDetection: false,
@@ -550,6 +556,42 @@ const InterviewerDashboard = () => {
     setIsFullscreen(false);
   };
 
+  // Draggable monitoring handlers
+  const handleMonitorMouseDown = (e) => {
+    setIsDraggingMonitor(true);
+    const rect = monitorRef.current?.getBoundingClientRect();
+    if (rect) {
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+    }
+  };
+
+  const handleMonitorMouseMove = useCallback((e) => {
+    if (!isDraggingMonitor) return;
+
+    let newX = e.clientX - dragOffset.x;
+    let newY = e.clientY - dragOffset.y;
+
+    // Keep within viewport bounds
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    const monitorWidth = 350;
+    const monitorHeight = 400;
+
+    if (newX < 0) newX = 0;
+    if (newY < 0) newY = 0;
+    if (newX > windowWidth - monitorWidth) newX = windowWidth - monitorWidth;
+    if (newY > windowHeight - monitorHeight) newY = windowHeight - monitorHeight;
+
+    setMonitorPosition({ x: newX, y: newY });
+  }, [isDraggingMonitor, dragOffset]);
+
+  const handleMonitorMouseUp = useCallback(() => {
+    setIsDraggingMonitor(false);
+  }, []);
+
   // Handle escape key to exit fullscreen
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -566,6 +608,19 @@ const InterviewerDashboard = () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isFullscreen]);
+
+  // Handle monitor dragging
+  useEffect(() => {
+    if (isDraggingMonitor) {
+      document.addEventListener('mousemove', handleMonitorMouseMove);
+      document.addEventListener('mouseup', handleMonitorMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMonitorMouseMove);
+      document.removeEventListener('mouseup', handleMonitorMouseUp);
+    };
+  }, [isDraggingMonitor, handleMonitorMouseMove, handleMonitorMouseUp]);
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -667,10 +722,12 @@ const InterviewerDashboard = () => {
     mainVideoArea: {
       flex: 1,
       position: 'relative',
-      borderRadius: '20px',
+      borderRadius: '24px',
       overflow: 'hidden',
-      background: '#1f2937',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+      background: 'linear-gradient(145deg, #1f2937, #374151)',
+      boxShadow: '0 25px 50px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.05)',
+      border: '2px solid rgba(255,255,255,0.1)',
+      backdropFilter: 'blur(10px)'
     },
     candidateVideo: {
       width: '100%',
@@ -681,15 +738,18 @@ const InterviewerDashboard = () => {
       position: 'absolute',
       bottom: '20px',
       left: '20px',
-      background: 'rgba(0,0,0,0.7)',
+      background: 'rgba(0,0,0,0.8)',
+      backdropFilter: 'blur(10px)',
       color: 'white',
-      padding: '8px 16px',
-      borderRadius: '8px',
+      padding: '10px 16px',
+      borderRadius: '12px',
       fontSize: '14px',
-      fontWeight: '500',
+      fontWeight: '600',
       display: 'flex',
       alignItems: 'center',
-      gap: '8px'
+      gap: '8px',
+      border: '1px solid rgba(255,255,255,0.2)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
     },
     detectionCanvas: {
       position: 'absolute',
@@ -701,17 +761,20 @@ const InterviewerDashboard = () => {
     },
     participantGrid: {
       display: 'flex',
-      gap: '12px',
-      height: '140px'
+      gap: '16px',
+      height: '160px'
     },
     participantVideo: {
-      width: '200px',
-      height: '140px',
-      borderRadius: '12px',
+      width: '220px',
+      height: '160px',
+      borderRadius: '16px',
       overflow: 'hidden',
       position: 'relative',
-      background: '#1f2937',
-      boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
+      background: 'linear-gradient(145deg, #1f2937, #374151)',
+      boxShadow: '0 12px 24px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.1)',
+      border: '2px solid rgba(255,255,255,0.1)',
+      transition: 'all 0.3s ease',
+      cursor: 'pointer'
     },
     participantVideoElement: {
       width: '100%',
@@ -737,15 +800,20 @@ const InterviewerDashboard = () => {
       flexDirection: 'column',
       width: '100%',
       height: '100%',
-      background: 'rgba(51, 51, 51, 0.8)',
+      background: 'linear-gradient(145deg, rgba(31, 41, 55, 0.9), rgba(55, 65, 81, 0.9))',
+      backdropFilter: 'blur(10px)',
       color: 'white',
-      fontSize: '24px',
-      gap: '12px'
+      fontSize: '48px',
+      gap: '16px',
+      border: '2px dashed rgba(255,255,255,0.3)',
+      borderRadius: '16px'
     },
     noVideoText: {
-      fontSize: '14px',
-      color: '#ccc',
-      textAlign: 'center'
+      fontSize: '16px',
+      color: 'rgba(255,255,255,0.8)',
+      textAlign: 'center',
+      fontWeight: '500',
+      letterSpacing: '0.5px'
     },
     controlBar: {
       position: 'absolute',
@@ -900,6 +968,29 @@ const InterviewerDashboard = () => {
 
   return (
     <div style={styles.container}>
+      {/* CSS Animations */}
+      <style>
+        {`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+          }
+
+          .video-hover:hover {
+            transform: scale(1.02);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.4) !important;
+          }
+
+          .control-hover:hover {
+            transform: scale(1.1);
+            filter: brightness(1.2);
+          }
+
+          .participant-video:hover {
+            transform: scale(1.05);
+          }
+        `}
+      </style>
       {/* Left Sidebar */}
       <div style={styles.sidebar}>
         <div style={styles.sidebarIcon}>🏠</div>
@@ -926,7 +1017,7 @@ const InterviewerDashboard = () => {
         {/* Video Container */}
         <div style={styles.videoContainer}>
           {/* Main Candidate Video */}
-          <div style={styles.mainVideoArea}>
+          <div style={styles.mainVideoArea} className="video-hover" onClick={toggleFullscreen}>
             {remoteStream ? (
               <>
                 <video
@@ -942,59 +1033,159 @@ const InterviewerDashboard = () => {
                 <div style={styles.videoLabel}>
                   <div style={styles.statusIndicator}></div>
                   {candidateInfo ? candidateInfo.name : 'Candidate'}
+                  <span style={{ fontSize: '12px', opacity: 0.8, marginLeft: '8px' }}>
+                    Click to fullscreen
+                  </span>
+                </div>
+
+                {/* Video Quality Indicators */}
+                <div style={{
+                  position: 'absolute',
+                  top: '20px',
+                  right: '20px',
+                  display: 'flex',
+                  gap: '8px'
+                }}>
+                  <div style={{
+                    background: 'rgba(0,0,0,0.8)',
+                    backdropFilter: 'blur(10px)',
+                    color: '#4ade80',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    border: '1px solid rgba(74, 222, 128, 0.3)'
+                  }}>
+                    🟢 HD
+                  </div>
+                  {detectionActive && (
+                    <div style={{
+                      background: 'rgba(0,0,0,0.8)',
+                      backdropFilter: 'blur(10px)',
+                      color: '#f59e0b',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      border: '1px solid rgba(245, 158, 11, 0.3)'
+                    }}>
+                      🤖 AI Active
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
               <div style={styles.noVideo}>
-                👤
-                <div style={styles.noVideoText}>Waiting for candidate</div>
+                <div style={{
+                  fontSize: '64px',
+                  marginBottom: '16px',
+                  opacity: 0.6
+                }}>
+                  📹
+                </div>
+                <div style={styles.noVideoText}>Waiting for candidate to join...</div>
+                <div style={{
+                  fontSize: '14px',
+                  color: 'rgba(255,255,255,0.5)',
+                  marginTop: '8px'
+                }}>
+                  Session ID: {sessionId}
+                </div>
               </div>
             )}
           </div>
 
           {/* Participant Grid */}
           <div style={styles.participantGrid}>
-            <div style={styles.participantVideo}>
+            <div style={styles.participantVideo} className="participant-video">
               {localStream ? (
-                <video
-                  ref={localVideoRef}
-                  style={styles.participantVideoElement}
-                  autoPlay
-                  muted
-                  playsInline
-                />
+                <>
+                  <video
+                    ref={localVideoRef}
+                    style={styles.participantVideoElement}
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                  {/* Audio/Video Status Indicators */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    display: 'flex',
+                    gap: '4px'
+                  }}>
+                    <div style={{
+                      background: 'rgba(0,0,0,0.7)',
+                      borderRadius: '6px',
+                      padding: '4px',
+                      fontSize: '12px'
+                    }}>
+                      🎤
+                    </div>
+                    <div style={{
+                      background: 'rgba(0,0,0,0.7)',
+                      borderRadius: '6px',
+                      padding: '4px',
+                      fontSize: '12px'
+                    }}>
+                      📹
+                    </div>
+                  </div>
+                </>
               ) : (
                 <div style={styles.noVideo}>
                   📷
                   <div style={styles.noVideoText}>Camera off</div>
                 </div>
               )}
-              <div style={styles.participantLabel}>You</div>
+              <div style={styles.participantLabel}>
+                You (Interviewer)
+              </div>
+            </div>
+
+            {/* Additional participant slot */}
+            <div style={{...styles.participantVideo, opacity: 0.5}} className="participant-video">
+              <div style={styles.noVideo}>
+                <div style={{ fontSize: '24px', marginBottom: '8px' }}>
+                  👤
+                </div>
+                <div style={styles.noVideoText}>Available slot</div>
+              </div>
+              <div style={styles.participantLabel}>
+                + Add participant
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Control Bar */}
+        {/* Enhanced Control Bar */}
         <div style={styles.controlBar}>
-          <button style={styles.controlButton} title="Mute">
+          <button style={styles.controlButton} className="control-hover" title="Toggle Microphone">
             🎤
           </button>
-          <button style={styles.controlButton} title="Camera">
+          <button style={styles.controlButton} className="control-hover" title="Toggle Camera">
             📹
           </button>
-          <button style={styles.controlButton} title="Share Screen">
+          <button style={styles.controlButton} className="control-hover" title="Share Screen">
             📺
           </button>
-          <button style={{...styles.controlButton, ...styles.recordButton}} title="Record">
+          <button style={{...styles.controlButton, ...styles.recordButton}} className="control-hover" title="Start Recording">
             ⏺
           </button>
-          <button style={styles.controlButton} title="Breakout Rooms">
+          <button style={styles.controlButton} className="control-hover" title="Manage Participants">
             👥
           </button>
-          <button style={styles.controlButton} title="Reactions">
+          <button style={styles.controlButton} className="control-hover" title="Reactions">
             😊
           </button>
-          <button style={{...styles.controlButton, ...styles.endButton}} onClick={endSession} title="End Session">
+          <div style={{
+            width: '2px',
+            height: '30px',
+            background: 'rgba(255,255,255,0.3)',
+            margin: '0 8px'
+          }}></div>
+          <button style={{...styles.controlButton, ...styles.endButton}} className="control-hover" onClick={endSession} title="End Interview Session">
             📞
           </button>
         </div>
@@ -1032,20 +1223,66 @@ const InterviewerDashboard = () => {
         </div>
       </div>
 
-      {/* Floating AlertsMonitor */}
-      <div style={{
-        position: 'fixed',
-        top: '620px',
-        right: '20px',
-        width: '350px',
-        zIndex: 199
-      }}>
-        <AlertsMonitor
-          violations={violations}
-          focusStatus={focusStatus}
-          systemStatus={systemStatus}
-          serviceStats={serviceStats}
-        />
+      {/* Draggable Live Monitoring Panel */}
+      <div
+        ref={monitorRef}
+        style={{
+          position: 'fixed',
+          left: monitorPosition.x,
+          top: monitorPosition.y,
+          width: '350px',
+          zIndex: 199,
+          cursor: isDraggingMonitor ? 'grabbing' : 'grab',
+          transform: isDraggingMonitor ? 'scale(1.02)' : 'scale(1)',
+          transition: isDraggingMonitor ? 'none' : 'transform 0.2s ease',
+          filter: isDraggingMonitor ? 'drop-shadow(0 15px 35px rgba(0,0,0,0.3))' : 'drop-shadow(0 8px 25px rgba(0,0,0,0.15))'
+        }}
+        onMouseDown={handleMonitorMouseDown}
+      >
+        <div style={{
+          background: 'linear-gradient(145deg, rgba(255,255,255,0.95), rgba(248,250,252,0.95))',
+          backdropFilter: 'blur(20px)',
+          borderRadius: '20px',
+          border: '2px solid rgba(255,255,255,0.3)',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+          overflow: 'hidden',
+          userSelect: 'none'
+        }}>
+          {/* Draggable Header */}
+          <div style={{
+            padding: '16px 20px',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            fontWeight: '600',
+            fontSize: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            cursor: 'grab'
+          }}>
+            <span>🛡️</span>
+            Live Monitoring
+            <div style={{
+              marginLeft: 'auto',
+              width: '8px',
+              height: '8px',
+              background: '#4ade80',
+              borderRadius: '50%',
+              boxShadow: '0 0 0 2px rgba(74, 222, 128, 0.3)',
+              animation: 'pulse 2s infinite'
+            }}></div>
+          </div>
+
+          {/* Monitor Content */}
+          <div style={{ padding: '0' }}>
+            <AlertsMonitor
+              violations={violations}
+              focusStatus={focusStatus}
+              systemStatus={systemStatus}
+              serviceStats={serviceStats}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Fullscreen Overlay */}
