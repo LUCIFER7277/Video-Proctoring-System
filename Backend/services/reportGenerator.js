@@ -33,24 +33,18 @@ class ReportGenerator {
       const filename = `interview_report_${interview.sessionId}_${Date.now()}.pdf`;
       const filePath = path.join(this.reportsDir, filename);
 
-      // Create PDF with Promise to ensure completion
-      await new Promise((resolve, reject) => {
-        const stream = fs.createWriteStream(filePath);
-        doc.pipe(stream);
+      // Pipe PDF to file
+      doc.pipe(fs.createWriteStream(filePath));
 
-        // Add content
-        this.addHeader(doc, interview);
-        this.addInterviewSummary(doc, interview);
-        this.addViolationSummary(doc, violationSummary);
-        this.addViolationDetails(doc, violations);
-        this.addFooter(doc);
+      // Add content
+      this.addHeader(doc, interview);
+      this.addInterviewSummary(doc, interview);
+      this.addViolationSummary(doc, violationSummary);
+      this.addViolationDetails(doc, violations);
+      this.addFooter(doc);
 
-        // Finalize PDF
-        doc.end();
-
-        stream.on('finish', resolve);
-        stream.on('error', reject);
-      });
+      // Finalize PDF
+      doc.end();
 
       // Update interview with report path
       interview.reportPath = filePath;
@@ -278,65 +272,56 @@ class ReportGenerator {
       const filename = `bulk_report_${Date.now()}.pdf`;
       const filePath = path.join(this.reportsDir, filename);
 
-      // Create PDF with Promise to ensure completion
-      await new Promise((resolve, reject) => {
-        const stream = fs.createWriteStream(filePath);
-        doc.pipe(stream);
+      doc.pipe(fs.createWriteStream(filePath));
 
-        // Header
-        doc.fontSize(24)
-           .fillColor('#2C3E50')
-           .text('BULK INTERVIEW REPORT', 50, 50, { align: 'center' });
+      // Header
+      doc.fontSize(24)
+         .fillColor('#2C3E50')
+         .text('BULK INTERVIEW REPORT', 50, 50, { align: 'center' });
 
-        doc.fontSize(14)
-           .text(`Period: ${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`, 50, 100, { align: 'center' });
+      doc.fontSize(14)
+         .text(`Period: ${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`, 50, 100, { align: 'center' });
 
-        doc.strokeColor('#3498DB')
-           .lineWidth(3)
-           .moveTo(50, 125)
-           .lineTo(545, 125)
-           .stroke();
+      doc.strokeColor('#3498DB')
+         .lineWidth(3)
+         .moveTo(50, 125)
+         .lineTo(545, 125)
+         .stroke();
 
-        // Summary statistics
-        const totalInterviews = interviews.length;
-        const completedInterviews = interviews.filter(i => i.status === 'completed').length;
-        const avgIntegrityScore = totalInterviews > 0 ? interviews.reduce((sum, i) => sum + (i.integrityScore || 0), 0) / totalInterviews : 0;
-        const totalViolations = interviews.reduce((sum, i) => sum + (i.violationCount || 0), 0);
+      // Summary statistics
+      const totalInterviews = interviews.length;
+      const completedInterviews = interviews.filter(i => i.status === 'completed').length;
+      const avgIntegrityScore = interviews.reduce((sum, i) => sum + i.integrityScore, 0) / totalInterviews;
+      const totalViolations = interviews.reduce((sum, i) => sum + i.violationCount, 0);
 
-        doc.fontSize(12)
-           .fillColor('#000000')
-           .text(`Total Interviews: ${totalInterviews}`, 50, 150)
-           .text(`Completed Interviews: ${completedInterviews}`, 50, 170)
-           .text(`Average Integrity Score: ${avgIntegrityScore.toFixed(1)}/100`, 50, 190)
-           .text(`Total Violations: ${totalViolations}`, 50, 210);
+      doc.fontSize(12)
+         .fillColor('#000000')
+         .text(`Total Interviews: ${totalInterviews}`, 50, 150)
+         .text(`Completed Interviews: ${completedInterviews}`, 50, 170)
+         .text(`Average Integrity Score: ${avgIntegrityScore.toFixed(1)}/100`, 50, 190)
+         .text(`Total Violations: ${totalViolations}`, 50, 210);
 
-        // Interview list
-        let y = 250;
-        doc.fontSize(14)
-           .text('INTERVIEW DETAILS', 50, y);
+      // Interview list
+      let y = 250;
+      doc.fontSize(14)
+         .text('INTERVIEW DETAILS', 50, y);
 
-        y += 30;
-        interviews.forEach((interview, index) => {
-          if (y > 700) {
-            doc.addPage();
-            y = 50;
-          }
+      y += 30;
+      interviews.forEach((interview, index) => {
+        if (y > 700) {
+          doc.addPage();
+          y = 50;
+        }
 
-          doc.fontSize(10)
-             .text(`${index + 1}. ${interview.candidateName} (${interview.sessionId})`, 50, y)
-             .text(`Integrity Score: ${interview.integrityScore}/100 | Violations: ${interview.violationCount}`, 70, y + 15)
-             .text(`Date: ${new Date(interview.startTime).toLocaleDateString()}`, 70, y + 30);
+        doc.fontSize(10)
+           .text(`${index + 1}. ${interview.candidateName} (${interview.sessionId})`, 50, y)
+           .text(`Integrity Score: ${interview.integrityScore}/100 | Violations: ${interview.violationCount}`, 70, y + 15)
+           .text(`Date: ${new Date(interview.startTime).toLocaleDateString()}`, 70, y + 30);
 
-          y += 50;
-        });
-
-        doc.end();
-
-        stream.on('finish', () => resolve({ totalInterviews }));
-        stream.on('error', reject);
+        y += 50;
       });
 
-      const totalInterviews = interviews.length;
+      doc.end();
 
       return {
         success: true,
