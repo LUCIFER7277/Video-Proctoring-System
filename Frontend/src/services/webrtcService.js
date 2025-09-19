@@ -34,10 +34,17 @@ class WebRTCService {
   }
 
   // Create peer connection
-  createPeerConnection() {
+  async createPeerConnection() {
     if (this.peerConnection) {
       this.peerConnection.close();
     }
+
+    // Import the async config function
+    const { getWebRTCConfig } = await import('../utils/webrtcConfig.js');
+
+    // Get updated configuration with TURN servers
+    const updatedConfig = await getWebRTCConfig();
+    this.rtcConfiguration = updatedConfig;
 
     this.peerConnection = new RTCPeerConnection(this.rtcConfiguration);
 

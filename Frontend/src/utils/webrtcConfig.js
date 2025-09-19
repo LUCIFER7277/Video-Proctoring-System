@@ -1,5 +1,5 @@
 // WebRTC Configuration utility
-export const getWebRTCConfig = () => {
+export const getWebRTCConfig = async () => {
   // Get STUN servers from environment variables
   const stunServersEnv = import.meta.env.VITE_STUN_SERVERS;
 
@@ -29,7 +29,10 @@ export const getWebRTCConfig = () => {
     urls: server.startsWith('stun:') ? server : `stun:${server}`
   }));
 
-  // Add TURN servers if configured
+  // Add Metered.ca TURN servers
+  await addMeteredTurnServers(iceServers);
+
+  // Add legacy TURN servers if configured
   const turnUrl = import.meta.env.VITE_TURN_SERVER_URL;
   const turnUsername = import.meta.env.VITE_TURN_USERNAME;
   const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
@@ -112,4 +115,117 @@ export const logWebRTCConfig = () => {
   console.log('STUN Servers:', config.iceServers.filter(server => server.urls.includes('stun')));
   console.log('TURN Servers:', config.iceServers.filter(server => server.urls.includes('turn')));
   return config;
+};
+
+// Metered.ca TURN server integration
+export const addMeteredTurnServers = async (iceServers) => {
+  const meteredApiKey = import.meta.env.VITE_METERED_API_KEY;
+  const meteredAppName = import.meta.env.VITE_METERED_APP_NAME;
+  const meteredUsername = import.meta.env.VITE_METERED_USERNAME;
+  const meteredPassword = import.meta.env.VITE_METERED_PASSWORD;
+
+  // Option 1: Dynamic credentials (recommended for production)
+  if (meteredApiKey && meteredAppName) {
+    try {
+      console.log('Fetching dynamic TURN credentials from Metered.ca...');
+      const response = await fetch(
+        `https://${meteredAppName}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`
+      );
+
+      if (response.ok) {
+        const turnServers = await response.json();
+        iceServers.push(...turnServers);
+        console.log('Added Metered.ca dynamic TURN servers:', turnServers.length);
+        return;
+      } else {
+        console.warn('Failed to fetch Metered.ca credentials:', response.status);
+      }
+    } catch (error) {
+      console.warn('Error fetching Metered.ca credentials:', error.message);
+    }
+  }
+
+  // Option 2: Manual username/password credentials
+  if (meteredUsername && meteredPassword) {
+    console.log('Using Metered.ca manual credentials...');
+    const manualTurnServers = [
+      {
+        urls: 'turn:global.relay.metered.ca:80',
+        username: meteredUsername,
+        credential: meteredPassword
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+        username: meteredUsername,
+        credential: meteredPassword
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:443',
+        username: meteredUsername,
+        credential: meteredPassword
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:443?transport=tcp',
+        username: meteredUsername,
+        credential: meteredPassword
+      }
+    ];
+
+    iceServers.push(...manualTurnServers);
+    console.log('Added Metered.ca manual TURN servers:', manualTurnServers.length);
+    return;
+  }
+
+  // Option 3: Static authentication (fallback)
+  console.log('Using Metered.ca static TURN servers...');
+  const staticTurnServers = [
+    {
+      urls: 'turn:staticauth.openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayprojectsecret'
+    },
+    {
+      urls: 'turn:staticauth.openrelay.metered.ca:80?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayprojectsecret'
+    },
+    {
+      urls: 'turn:staticauth.openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayprojectsecret'
+    },
+    {
+      urls: 'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayprojectsecret'
+    }
+  ];
+
+  iceServers.push(...staticTurnServers);
+  console.log('Added Metered.ca static TURN servers:', staticTurnServers.length);
+};
+
+// Get Metered.ca TURN credentials dynamically
+export const getMeteredCredentials = async () => {
+  const meteredApiKey = import.meta.env.VITE_METERED_API_KEY;
+  const meteredAppName = import.meta.env.VITE_METERED_APP_NAME;
+
+  if (!meteredApiKey || !meteredAppName) {
+    throw new Error('Metered.ca API key or app name not configured');
+  }
+
+  try {
+    const response = await fetch(
+      `https://${meteredAppName}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch credentials: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching Metered.ca credentials:', error);
+    throw error;
+  }
 };

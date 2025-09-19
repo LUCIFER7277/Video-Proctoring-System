@@ -6,6 +6,7 @@ class WebRTCTester {
       webrtcSupport: false,
       mediaAccess: false,
       stunConnectivity: false,
+      turnConnectivity: false,
       peerConnection: false,
       details: {}
     };
@@ -95,7 +96,8 @@ class WebRTCTester {
     const stunServers = [
       'stun:stun.l.google.com:19302',
       'stun:stun1.l.google.com:19302',
-      'stun:stun2.l.google.com:19302'
+      'stun:stun2.l.google.com:19302',
+      'stun:stun.relay.metered.ca:80'
     ];
 
     const results = [];
@@ -113,6 +115,112 @@ class WebRTCTester {
     this.testResults.stunConnectivity = results.some(r => r.success);
 
     console.log(this.testResults.stunConnectivity ? '✅' : '❌', 'STUN Connectivity:', results);
+
+    // Test TURN servers
+    await this.testTURNConnectivity();
+  }
+
+  // Test TURN server connectivity
+  async testTURNConnectivity() {
+    console.log('🔄 Testing TURN server connectivity...');
+
+    // Test multiple TURN server options
+    const turnServers = [
+      // Dynamic API-based servers (your actual credentials)
+      {
+        urls: 'turn:global.relay.metered.ca:80',
+        username: '98fac0f7413bdad2e992fd6a',
+        credential: 'VeO/0PcdyD8C/SG8'
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:443',
+        username: '98fac0f7413bdad2e992fd6a',
+        credential: 'VeO/0PcdyD8C/SG8'
+      },
+      // Static fallback servers
+      {
+        urls: 'turn:staticauth.openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayprojectsecret'
+      },
+      {
+        urls: 'turn:staticauth.openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayprojectsecret'
+      }
+    ];
+
+    const results = [];
+
+    for (const turnServer of turnServers) {
+      try {
+        const result = await this.testSingleTURN(turnServer);
+        results.push({
+          server: turnServer.urls,
+          success: true,
+          type: turnServer.urls.includes('global.relay') ? 'dynamic' : 'static',
+          ...result
+        });
+      } catch (error) {
+        results.push({
+          server: turnServer.urls,
+          success: false,
+          type: turnServer.urls.includes('global.relay') ? 'dynamic' : 'static',
+          error: error.message
+        });
+      }
+    }
+
+    this.testResults.details.turn = results;
+    this.testResults.turnConnectivity = results.some(r => r.success);
+
+    console.log(this.testResults.turnConnectivity ? '✅' : '❌', 'TURN Connectivity:', results);
+  }
+
+  // Test single TURN server
+  async testSingleTURN(turnServer) {
+    return new Promise((resolve, reject) => {
+      const pc = new RTCPeerConnection({
+        iceServers: [turnServer],
+        iceTransportPolicy: 'relay' // Force TURN usage
+      });
+
+      let resolved = false;
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          pc.close();
+          reject(new Error('TURN test timeout'));
+        }
+      }, 10000); // Longer timeout for TURN
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && event.candidate.type === 'relay' && !resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          pc.close();
+          resolve({
+            candidateType: event.candidate.type,
+            relayProtocol: event.candidate.relayProtocol,
+            address: event.candidate.address,
+            port: event.candidate.port
+          });
+        }
+      };
+
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete' && !resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          pc.close();
+          reject(new Error('No TURN relay candidates found'));
+        }
+      };
+
+      // Create a dummy data channel to trigger ICE gathering
+      pc.createDataChannel('test');
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+    });
   }
 
   // Test single STUN server
@@ -257,6 +365,11 @@ class WebRTCTester {
     if (!this.testResults.stunConnectivity) {
       recommendations.push('Check your firewall settings - STUN servers may be blocked');
       recommendations.push('Try connecting from a different network');
+    }
+
+    if (!this.testResults.turnConnectivity) {
+      recommendations.push('TURN servers are not accessible - may need alternative TURN provider');
+      recommendations.push('Check if your network blocks outgoing connections on ports 80/443');
     }
 
     if (!this.testResults.peerConnection) {
