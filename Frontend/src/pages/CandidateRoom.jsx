@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 
-// Import WebRTC configuration
-import { createPeerConnection, logWebRTCConfig } from '../utils/webrtcConfig';
+// Import Professional WebRTC Service
+import ProfessionalWebRTCService from '../services/professionalWebRTCService';
 
 // Professional CSS animations
 const animations = `
@@ -97,24 +97,17 @@ const CandidateRoom = () => {
   // Refs
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const peerConnectionRef = useRef(null);
+  const webrtcServiceRef = useRef(null);
   const chatRef = useRef(null);
-  const pendingIceCandidatesRef = useRef([]);
 
-  // WebRTC configuration - using enhanced config
-  const [rtcConfiguration, setRtcConfiguration] = useState(null);
-
+  // Initialize Professional WebRTC Service
   useEffect(() => {
-    // Load WebRTC configuration asynchronously
-    const loadWebRTCConfig = async () => {
-      try {
-        const config = await logWebRTCConfig();
-        setRtcConfiguration(config);
-      } catch (error) {
-        console.error('Failed to load WebRTC configuration:', error);
+    webrtcServiceRef.current = new ProfessionalWebRTCService();
+    return () => {
+      if (webrtcServiceRef.current) {
+        webrtcServiceRef.current.cleanup();
       }
     };
-    loadWebRTCConfig();
   }, []);
 
   useEffect(() => {
@@ -139,21 +132,15 @@ const CandidateRoom = () => {
     };
   }, [sessionId, navigate]);
 
-  // Initialize peer connection when localStream is available
+  // Initialize WebRTC service when socket is available
   useEffect(() => {
-    if (localStream && socket && !peerConnectionRef.current) {
-      console.log('Candidate: Local stream available, initializing peer connection...');
-      initializePeerConnection().catch(error => {
-        console.error('Failed to initialize peer connection:', error);
+    if (socket && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
+      initializeWebRTCService().catch(error => {
+        console.error('Failed to initialize WebRTC service:', error);
+        addNotification('Failed to initialize video connection', 'error');
       });
-
-      // Signal that candidate is ready for WebRTC
-      setTimeout(() => {
-        console.log('Candidate: Signaling ready for WebRTC...');
-        socket.emit('candidate-ready', { sessionId });
-      }, 500);
     }
-  }, [localStream, socket]);
+  }, [socket]);
 
   // Ensure video elements get streams when refs are available
   useEffect(() => {
@@ -268,33 +255,22 @@ const CandidateRoom = () => {
 
     socket.on('offer', async (offer) => {
       console.log('Received offer from interviewer');
-      await handleOffer(offer);
+      if (webrtcServiceRef.current) {
+        await webrtcServiceRef.current.handleOffer(offer);
+      }
     });
 
     socket.on('answer', async (answer) => {
       console.log('Received answer from interviewer');
-      await peerConnectionRef.current.setRemoteDescription(answer);
+      if (webrtcServiceRef.current) {
+        await webrtcServiceRef.current.handleAnswer(answer);
+      }
     });
 
     socket.on('ice-candidate', async (candidate) => {
-      try {
-        console.log('Candidate: Received ICE candidate from interviewer');
-
-        if (!peerConnectionRef.current) {
-          console.warn('Candidate: No peer connection, ignoring ICE candidate');
-          return;
-        }
-
-        // Check if remote description is set
-        if (peerConnectionRef.current.remoteDescription) {
-          await peerConnectionRef.current.addIceCandidate(candidate);
-          console.log('Candidate: Added ICE candidate successfully');
-        } else {
-          console.log('Candidate: Remote description not set, queuing ICE candidate');
-          pendingIceCandidatesRef.current.push(candidate);
-        }
-      } catch (error) {
-        console.error('Candidate: Error adding ICE candidate:', error);
+      console.log('Candidate: Received ICE candidate from interviewer');
+      if (webrtcServiceRef.current) {
+        await webrtcServiceRef.current.handleIceCandidate(candidate);
       }
     });
 
@@ -420,124 +396,106 @@ const CandidateRoom = () => {
     }
   };
 
-  const initializePeerConnection = async () => {
-    console.log('Candidate: Initializing peer connection with enhanced WebRTC config');
-
-    const peerConnection = await createPeerConnection(
-      // ontrack handler
-      (event) => {
-        console.log('📹 CANDIDATE: Received remote stream from interviewer');
-        console.log('📹 Event streams:', event.streams.length);
-        console.log('📹 Event tracks:', event.track.kind, event.track.readyState);
-        console.log('📹 Track ID:', event.track.id);
-        console.log('📹 Track enabled:', event.track.enabled);
-        console.log('📹 Track muted:', event.track.muted);
-
-        const [remoteStream] = event.streams;
-        if (remoteStream) {
-          console.log('📹 Remote stream ID:', remoteStream.id);
-          console.log('📹 Remote stream tracks:', remoteStream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
-          console.log('📹 Video tracks count:', remoteStream.getVideoTracks().length);
-          console.log('📹 Audio tracks count:', remoteStream.getAudioTracks().length);
-
-          setRemoteStream(remoteStream);
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-            console.log('📹 Set remote video srcObject successfully');
-          } else {
-            console.warn('📹 Remote video ref not available');
-          }
-        } else {
-          console.error('📹 No remote stream received');
-        }
-      },
-      // onicecandidate handler
-      (event) => {
-        if (event.candidate && socket) {
-          console.log('Candidate: Sending ICE candidate to interviewer');
-          socket.emit('ice-candidate', event.candidate);
-        }
-      },
-      // onconnectionstatechange handler
-      () => {
-        console.log('Candidate: WebRTC connection state:', peerConnection.connectionState);
-        if (peerConnection.connectionState === 'connected') {
-          addNotification('Video connection established with interviewer', 'success');
-        } else if (peerConnection.connectionState === 'failed') {
-          console.error('WebRTC connection failed, attempting to restart ICE');
-          peerConnection.restartIce();
-          addNotification('Connection issue detected, attempting to reconnect...', 'warning');
-        }
-      }
-    );
-
-    peerConnectionRef.current = peerConnection;
-
-    // Add local stream to peer connection
-    if (localStream) {
-      console.log('🎥 CANDIDATE: Adding local stream tracks to peer connection');
-      console.log('🎥 Local stream ID:', localStream.id);
-      console.log('🎥 Local stream tracks:', localStream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
-
-      localStream.getTracks().forEach(track => {
-        console.log('🎥 Adding track to peer connection:', track.kind, track.readyState, track.enabled);
-        peerConnection.addTrack(track, localStream);
-      });
-      console.log(`🎥 Added ${localStream.getTracks().length} tracks to peer connection`);
-    } else {
-      console.warn('🎥 No local stream available when initializing peer connection');
-    }
-  };
-
-  const handleOffer = async (offer) => {
+  const initializeWebRTCService = async () => {
     try {
-      console.log('Candidate: Handling offer from interviewer...');
+      console.log('🚀 Initializing Professional WebRTC Service for Candidate...');
 
-      if (!peerConnectionRef.current) {
-        console.error('Candidate: No peer connection available when handling offer!');
-        return;
-      }
+      const service = webrtcServiceRef.current;
 
-      console.log('Candidate: Setting remote description...');
-      await peerConnectionRef.current.setRemoteDescription(offer);
-
-      // Process any pending ICE candidates
-      console.log(`Candidate: Processing ${pendingIceCandidatesRef.current.length} pending ICE candidates`);
-      for (const candidate of pendingIceCandidatesRef.current) {
-        try {
-          await peerConnectionRef.current.addIceCandidate(candidate);
-          console.log('Candidate: Added pending ICE candidate');
-        } catch (error) {
-          console.error('Candidate: Error adding pending ICE candidate:', error);
+      // Set up event handlers
+      service.onRemoteStream = (remoteStream) => {
+        console.log('📹 CANDIDATE: Received remote stream from interviewer');
+        setRemoteStream(remoteStream);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+          // Ensure audio is audible
+          try { remoteVideoRef.current.muted = false; } catch {}
+          remoteVideoRef.current.play?.().catch((e) => {
+            console.warn('Autoplay with sound blocked, waiting for user gesture to start audio.', e?.message);
+            addNotification('Click anywhere to enable audio if muted by browser.', 'info');
+          });
+          console.log('📹 Set remote video srcObject successfully');
         }
+        addNotification('Video connection established with interviewer', 'success');
+      };
+
+      service.onConnectionEstablished = () => {
+        console.log('✅ WebRTC connection established');
+        addNotification('Video connection established', 'success');
+      };
+
+      service.onConnectionLost = () => {
+        console.log('⚠️ WebRTC connection lost');
+        addNotification('Connection lost, attempting to reconnect...', 'warning');
+      };
+
+      service.onError = (error) => {
+        console.error('🚨 WebRTC Error:', error);
+        addNotification(`Connection error: ${error.message}`, 'error');
+      };
+
+      // Initialize the service
+      await service.initialize(socket);
+
+      // Get local stream and set it to video element
+      const stream = service.localStream;
+      setLocalStream(stream);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
       }
-      // Clear the pending candidates queue
-      pendingIceCandidatesRef.current = [];
 
-      console.log('Candidate: Creating answer...');
-      const answer = await peerConnectionRef.current.createAnswer();
+      // Create peer connection
+      await service.createPeerConnection();
 
-      console.log('Candidate: Setting local description...');
-      await peerConnectionRef.current.setLocalDescription(answer);
+      // Signal that candidate is ready
+      setTimeout(() => {
+        console.log('Candidate: Signaling ready for WebRTC...');
+        socket.emit('candidate-ready', { sessionId });
+      }, 1000);
 
-      if (socket) {
-        console.log('Candidate: Sending answer to interviewer');
-        socket.emit('answer', answer);
-      }
-
-      console.log('Candidate: Successfully handled offer and sent answer');
+      console.log('✅ WebRTC service initialized successfully');
     } catch (error) {
-      console.error('Candidate: Error handling offer:', error);
+      console.error('❌ Failed to initialize WebRTC service:', error);
+      throw error;
     }
   };
 
-  const toggleAudio = () => {
-    if (localStream) {
+  // Handle offer is now managed by the Professional WebRTC Service
+
+  const toggleAudio = async () => {
+    if (!localStream) {
+      addNotification('No microphone stream available', 'error');
+      return;
+    }
+
+    try {
       const audioTrack = localStream.getAudioTracks()[0];
-      if (audioTrack) {
+      if (audioTrack && audioTrack.readyState === 'live') {
         audioTrack.enabled = !audioTrack.enabled;
         setIsAudioMuted(!audioTrack.enabled);
+      } else {
+        // Need to get a fresh audio track
+        console.log('🔄 Getting new microphone stream...');
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const newAudioTrack = audioStream.getAudioTracks()[0];
+        if (newAudioTrack) {
+          const oldAudioTrack = audioTrack || localStream.getAudioTracks()[0];
+          if (oldAudioTrack) {
+            localStream.removeTrack(oldAudioTrack);
+            try { oldAudioTrack.stop(); } catch {}
+          }
+          localStream.addTrack(newAudioTrack);
+          if (webrtcServiceRef.current && webrtcServiceRef.current.isConnected()) {
+            await webrtcServiceRef.current.replaceAudioTrack(newAudioTrack);
+          }
+          setIsAudioMuted(false);
+          addNotification('Microphone turned on', 'success');
+          console.log('✅ Microphone restarted with new track');
+        }
       }
+    } catch (err) {
+      console.error('❌ Failed to toggle microphone:', err);
+      addNotification('Failed to toggle microphone: ' + err.message, 'error');
     }
   };
 
@@ -593,13 +551,8 @@ const CandidateRoom = () => {
               }
 
               // Update peer connection if connected
-              if (peerConnectionRef.current && remoteStream) {
-                const sender = peerConnectionRef.current.getSenders().find(s =>
-                  s.track && s.track.kind === 'video'
-                );
-                if (sender) {
-                  await sender.replaceTrack(newVideoTrack);
-                }
+              if (webrtcServiceRef.current && webrtcServiceRef.current.isConnected()) {
+                await webrtcServiceRef.current.replaceVideoTrack(newVideoTrack);
               }
 
               setIsVideoMuted(false);
@@ -657,11 +610,8 @@ const CandidateRoom = () => {
   };
 
   const cleanup = () => {
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
-    }
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
+    if (webrtcServiceRef.current) {
+      webrtcServiceRef.current.cleanup();
     }
     if (socket) {
       socket.disconnect();
@@ -681,28 +631,25 @@ const CandidateRoom = () => {
 
   // Connection quality monitoring
   useEffect(() => {
-    if (peerConnectionRef.current) {
+    if (webrtcServiceRef.current && webrtcServiceRef.current.isConnected()) {
       const interval = setInterval(async () => {
-        const stats = await peerConnectionRef.current.getStats();
-        stats.forEach(report => {
-          if (report.type === 'inbound-rtp' && report.kind === 'video') {
-            const packetsLost = report.packetsLost || 0;
-            const packetsReceived = report.packetsReceived || 0;
-            const lossRate = packetsReceived > 0 ? packetsLost / packetsReceived : 0;
+        const stats = await webrtcServiceRef.current.getConnectionStats();
+        if (stats && stats.inboundVideo) {
+          const { packetsLost = 0, packetsReceived = 0 } = stats.inboundVideo;
+          const lossRate = packetsReceived > 0 ? packetsLost / packetsReceived : 0;
 
-            if (lossRate > 0.05) {
-              setConnectionQuality('poor');
-            } else if (lossRate > 0.02) {
-              setConnectionQuality('fair');
-            } else {
-              setConnectionQuality('good');
-            }
+          if (lossRate > 0.05) {
+            setConnectionQuality('poor');
+          } else if (lossRate > 0.02) {
+            setConnectionQuality('fair');
+          } else {
+            setConnectionQuality('good');
           }
-        });
+        }
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [peerConnectionRef.current]);
+  }, [webrtcServiceRef.current]);
 
   // Auto-remove notifications after 5 seconds
   useEffect(() => {
@@ -1241,7 +1188,6 @@ const CandidateRoom = () => {
               ref={remoteVideoRef}
               style={styles.remoteVideo}
               autoPlay
-              muted
               playsInline
             />
           ) : (

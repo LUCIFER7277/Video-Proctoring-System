@@ -55,9 +55,10 @@ export const getWebRTCConfig = async () => {
   return {
     iceServers,
     iceCandidatePoolSize: 10,
-    bundlePolicy: 'balanced', // Changed from 'max-bundle' to 'balanced' to fix SDP error
+    bundlePolicy: 'max-compat', // Using max-compat for better compatibility
     rtcpMuxPolicy: 'require',
-    iceTransportPolicy: 'all'
+    iceTransportPolicy: 'all',
+    sdpSemantics: 'unified-plan'
   };
 };
 
@@ -78,7 +79,10 @@ export const getFallbackWebRTCConfig = () => {
     iceServers: stunServers.map(server => ({
       urls: server.startsWith('stun:') ? server : `stun:${server}`
     })),
-    iceCandidatePoolSize: 5 // Reduced for compatibility
+    iceCandidatePoolSize: 5, // Reduced for compatibility
+    bundlePolicy: 'max-compat',
+    rtcpMuxPolicy: 'require',
+    sdpSemantics: 'unified-plan'
   };
 };
 
