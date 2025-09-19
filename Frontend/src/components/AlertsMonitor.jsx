@@ -68,10 +68,7 @@ const AlertsMonitor = ({
 
     setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Keep last 10 alerts
 
-    // Play sound if enabled
-    if (soundEnabled && alert.severity !== 'info') {
-      playAlertSound(alert.severity);
-    }
+    // Sound disabled for smooth interview process
 
     // Auto-dismiss info alerts after 5 seconds
     if (alert.severity === 'info') {
