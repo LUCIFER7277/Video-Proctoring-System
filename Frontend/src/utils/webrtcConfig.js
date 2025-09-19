@@ -1,5 +1,12 @@
 // WebRTC Configuration utility
 export const getWebRTCConfig = async () => {
+  console.log('🔧 Loading WebRTC configuration...');
+  console.log('🔧 Environment variables:', {
+    VITE_STUN_SERVERS: !!import.meta.env.VITE_STUN_SERVERS,
+    VITE_METERED_API_KEY: !!import.meta.env.VITE_METERED_API_KEY,
+    VITE_METERED_APP_NAME: !!import.meta.env.VITE_METERED_APP_NAME
+  });
+
   // Get STUN servers from environment variables
   const stunServersEnv = import.meta.env.VITE_STUN_SERVERS;
 
@@ -82,15 +89,30 @@ export const createPeerConnection = async (onTrack, onIceCandidate, onConnection
 
   try {
     // Try with enhanced configuration first
+    console.log('🔧 Loading enhanced WebRTC configuration...');
     config = await getWebRTCConfig();
+    console.log('🔧 Enhanced config loaded:', {
+      iceServersCount: config.iceServers?.length || 0,
+      iceCandidatePoolSize: config.iceCandidatePoolSize,
+      bundlePolicy: config.bundlePolicy
+    });
+
+    if (!config.iceServers || config.iceServers.length === 0) {
+      throw new Error('No ICE servers in enhanced config');
+    }
+
     peerConnection = new RTCPeerConnection(config);
-    console.log('Created peer connection with enhanced config');
+    console.log('✅ Created peer connection with enhanced config');
   } catch (error) {
-    console.warn('Enhanced config failed, using fallback:', error);
+    console.warn('❌ Enhanced config failed, using fallback:', error.message);
     // Fall back to basic configuration
     config = getFallbackWebRTCConfig();
+    console.log('🔧 Fallback config:', {
+      iceServersCount: config.iceServers?.length || 0,
+      iceCandidatePoolSize: config.iceCandidatePoolSize
+    });
     peerConnection = new RTCPeerConnection(config);
-    console.log('Created peer connection with fallback config');
+    console.log('✅ Created peer connection with fallback config');
   }
 
   if (onTrack) {
@@ -124,25 +146,37 @@ export const addMeteredTurnServers = async (iceServers) => {
   const meteredUsername = import.meta.env.VITE_METERED_USERNAME;
   const meteredPassword = import.meta.env.VITE_METERED_PASSWORD;
 
+  console.log('🔗 Configuring Metered.ca TURN servers...');
+  console.log('🔗 API Key available:', !!meteredApiKey);
+  console.log('🔗 App Name available:', !!meteredAppName);
+
   // Option 1: Dynamic credentials (recommended for production)
   if (meteredApiKey && meteredAppName) {
     try {
-      console.log('Fetching dynamic TURN credentials from Metered.ca...');
+      console.log('🔗 Fetching dynamic TURN credentials from Metered.ca...');
+      console.log('🔗 Fetching from:', `https://${meteredAppName}.metered.live/api/v1/turn/credentials`);
+
       const response = await fetch(
         `https://${meteredAppName}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`
       );
 
+      console.log('🔗 Response status:', response.status);
+
       if (response.ok) {
         const turnServers = await response.json();
+        console.log('🔗 Received TURN servers:', turnServers);
         iceServers.push(...turnServers);
-        console.log('Added Metered.ca dynamic TURN servers:', turnServers.length);
+        console.log('✅ Added Metered.ca dynamic TURN servers:', turnServers.length);
         return;
       } else {
-        console.warn('Failed to fetch Metered.ca credentials:', response.status);
+        const errorText = await response.text();
+        console.warn('❌ Failed to fetch Metered.ca credentials:', response.status, errorText);
       }
     } catch (error) {
-      console.warn('Error fetching Metered.ca credentials:', error.message);
+      console.warn('❌ Error fetching Metered.ca credentials:', error.message);
     }
+  } else {
+    console.log('🔗 No API credentials found, skipping dynamic TURN servers');
   }
 
   // Option 2: Manual username/password credentials
