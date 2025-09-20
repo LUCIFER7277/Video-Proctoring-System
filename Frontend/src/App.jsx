@@ -13,6 +13,7 @@ import LoadingScreen from './components/LoadingScreen';
 import SystemCheck from './components/SystemCheck';
 import ProtectedRoute from './components/ProtectedRoute';
 import ReportGenerator from './components/ReportGenerator';
+import DetectionTest from './components/DetectionTest';
 
 function App() {
   const [systemReady, setSystemReady] = useState(false);
@@ -149,6 +150,7 @@ function App() {
             <Route path="/reports" element={<ReportGenerator />} />
             <Route path="/system-check" element={<SystemCheck />} />
             <Route path="/webrtc-test" element={<WebRTCTest />} />
+            <Route path="/detection-test" element={<DetectionTest />} />
 
             <Route path="*" element={
               <div style={styles.notFound}>
