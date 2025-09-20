@@ -322,6 +322,24 @@ const InterviewerDashboard = () => {
         console.log("📹 INTERVIEWER: Received candidate stream");
         console.log("📺 DEBUG: Candidate stream ID:", candidateStream.id);
         console.log("📺 DEBUG: Candidate stream tracks:", candidateStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
+
+        // Detailed track analysis
+        const videoTracks = candidateStream.getVideoTracks();
+        const audioTracks = candidateStream.getAudioTracks();
+        console.log("📺 DEBUG: Video tracks count:", videoTracks.length);
+        console.log("📺 DEBUG: Audio tracks count:", audioTracks.length);
+
+        videoTracks.forEach((track, i) => {
+          console.log(`📺 DEBUG: Video track ${i}:`, {
+            id: track.id,
+            kind: track.kind,
+            enabled: track.enabled,
+            readyState: track.readyState,
+            label: track.label,
+            muted: track.muted
+          });
+        });
+
         console.log("📺 DEBUG: Current local stream ID for comparison:", localStream?.id);
         console.log("📺 DEBUG: Are streams the same?", candidateStream.id === localStream?.id);
 
@@ -329,6 +347,18 @@ const InterviewerDashboard = () => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = candidateStream;
           console.log("📺 DEBUG: Remote video element srcObject set:", remoteVideoRef.current.srcObject?.id);
+
+          // Force video element to load and play
+          remoteVideoRef.current.load();
+          remoteVideoRef.current.onloadedmetadata = () => {
+            console.log("📺 DEBUG: Remote video metadata loaded:", {
+              videoWidth: remoteVideoRef.current.videoWidth,
+              videoHeight: remoteVideoRef.current.videoHeight,
+              duration: remoteVideoRef.current.duration,
+              readyState: remoteVideoRef.current.readyState
+            });
+          };
+
           try {
             remoteVideoRef.current.muted = false;
           } catch {}
@@ -699,24 +729,47 @@ const InterviewerDashboard = () => {
   // Debug function to check video elements periodically
   const debugVideoElements = () => {
     console.log("🔍 DEBUG: Video Elements Status:");
+
+    // Local video element
+    const localVideoElement = localVideoRef.current;
     console.log("🔍 Local Video Element:", {
-      exists: !!localVideoRef.current,
-      srcObject: localVideoRef.current?.srcObject?.id,
-      tracks: localVideoRef.current?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
-      playing: !localVideoRef.current?.paused,
-      readyState: localVideoRef.current?.readyState
+      exists: !!localVideoElement,
+      srcObject: localVideoElement?.srcObject?.id,
+      tracks: localVideoElement?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
+      playing: !localVideoElement?.paused,
+      readyState: localVideoElement?.readyState,
+      videoWidth: localVideoElement?.videoWidth,
+      videoHeight: localVideoElement?.videoHeight,
+      currentTime: localVideoElement?.currentTime
     });
+
+    // Remote video element
+    const remoteVideoElement = remoteVideoRef.current;
     console.log("🔍 Remote Video Element:", {
-      exists: !!remoteVideoRef.current,
-      srcObject: remoteVideoRef.current?.srcObject?.id,
-      tracks: remoteVideoRef.current?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
-      playing: !remoteVideoRef.current?.paused,
-      readyState: remoteVideoRef.current?.readyState
+      exists: !!remoteVideoElement,
+      srcObject: remoteVideoElement?.srcObject?.id,
+      tracks: remoteVideoElement?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
+      playing: !remoteVideoElement?.paused,
+      readyState: remoteVideoElement?.readyState,
+      videoWidth: remoteVideoElement?.videoWidth,
+      videoHeight: remoteVideoElement?.videoHeight,
+      currentTime: remoteVideoElement?.currentTime
     });
+
+    // Stream states
     console.log("🔍 State Streams:", {
       localStreamId: localStream?.id,
+      localStreamTracks: localStream?.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`) || [],
       remoteStreamId: remoteStream?.id,
+      remoteStreamTracks: remoteStream?.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`) || [],
       streamsAreSame: localStream?.id === remoteStream?.id
+    });
+
+    // Check if video elements are actually showing different streams
+    console.log("🔍 Video Element Source Comparison:", {
+      localVideoSrcId: localVideoElement?.srcObject?.id,
+      remoteVideoSrcId: remoteVideoElement?.srcObject?.id,
+      videoElementsShowSameStream: localVideoElement?.srcObject?.id === remoteVideoElement?.srcObject?.id
     });
   };
 
@@ -1461,6 +1514,19 @@ const InterviewerDashboard = () => {
                 onClick={endSession}
               >
                 End Session
+              </button>
+            </div>
+            <div style={{ ...styles.controlButtons, marginTop: '12px' }}>
+              <button
+                style={{
+                  ...styles.button,
+                  background: "linear-gradient(135deg, #f97316, #ea580c)",
+                  color: "white",
+                  boxShadow: "0 4px 15px rgba(249, 115, 22, 0.4)"
+                }}
+                onClick={debugVideoElements}
+              >
+                🔍 Debug Video Streams
               </button>
             </div>
           </div>
