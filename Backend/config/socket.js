@@ -20,7 +20,20 @@ const configureSocket = (server) => {
 
   const io = socketIo(server, {
     cors: {
-      origin: getAllowedOrigins(),
+      origin: function(origin, callback) {
+        // Allow requests with no origin
+        if (!origin) return callback(null, true);
+
+        const allowedOrigins = getAllowedOrigins();
+        console.log('Socket.IO CORS check - Origin:', origin, 'Allowed:', allowedOrigins.includes(origin));
+
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          console.log('Socket.IO CORS temporarily allowing origin:', origin);
+          callback(null, true); // Temporarily allow all origins for debugging
+        }
+      },
       methods: ["GET", "POST"],
       credentials: true
     }

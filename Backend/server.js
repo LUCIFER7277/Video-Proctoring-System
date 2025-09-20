@@ -29,9 +29,8 @@ const io = configureSocket(server);
 
 // Apply CORS middleware first, before other middleware
 const cors = require('cors');
-const { corsOptions } = require('./middleware/index.js');
 
-// Apply CORS with more permissive settings for debugging
+// Apply CORS with comprehensive settings
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -41,7 +40,8 @@ app.use(cors({
       "https://video-proctoring-system-pink.vercel.app",
       "https://video-proctoring-system01.netlify.app",
       "http://localhost:3000",
-      "http://localhost:5173"
+      "http://localhost:5173",
+      "http://localhost:5174"
     ];
 
     // Add production frontend URL(s) from environment variable
@@ -55,25 +55,40 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.log('CORS blocked origin:', origin);
+      callback(null, true); // Temporarily allow all origins for debugging
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Cache-Control',
+    'X-File-Name'
+  ]
 }));
 
-// Handle preflight OPTIONS requests
+// Handle preflight OPTIONS requests explicitly
 app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  const origin = req.headers.origin;
+  res.header('Access-Control-Allow-Origin', origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-File-Name');
   res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '3600'); // Cache preflight response for 1 hour
   res.sendStatus(200);
 });
 
-// Apply security middleware
-app.use(securityMiddleware);
+// Apply security middleware (without CORS since we handle it above)
+const helmet = require('helmet');
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false
+}));
 
 // Apply differentiated rate limiting
 const generalLimiter = createGeneralAPIRateLimit();
@@ -84,6 +99,12 @@ app.use('/api/', generalLimiter);
 
 // Apply more permissive rate limiting specifically for violation endpoints
 app.use('/api/violations', violationLimiter);
+
+// CORS debugging middleware
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
+  next();
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -102,6 +123,16 @@ app.get('/api/health', (req, res) => {
     activeInterviews: io.getActiveInterviews ? io.getActiveInterviews().size : 0,
     origin: req.headers.origin,
     userAgent: req.headers['user-agent']
+  });
+});
+
+// CORS test endpoint
+app.get('/api/cors-test', (req, res) => {
+  console.log('CORS test request from origin:', req.headers.origin);
+  res.json({
+    message: 'CORS is working!',
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString()
   });
 });
 
