@@ -34,13 +34,8 @@ function App() {
       // Initialize TensorFlow.js backend
       await import('@tensorflow/tfjs').then(tf => tf.ready());
 
-      // Check media permissions (optional for development)
-      try {
-        await checkMediaPermissions();
-      } catch (error) {
-        console.warn('⚠️ Media devices not available:', error.message);
-        // Continue initialization for development
-      }
+      // Skip media permissions check for communication-only system
+      console.log('✅ Skipping media permissions check - communication-only mode');
 
       console.log('✅ System initialized successfully');
       setSystemReady(true);
@@ -53,11 +48,8 @@ function App() {
   const checkBrowserCompatibility = () => {
     const issues = [];
 
-    // Check required APIs
-    if (!navigator.mediaDevices?.getUserMedia) issues.push('getUserMedia not supported');
-    if (!window.MediaRecorder) issues.push('MediaRecorder not supported');
-    if (!window.WebGLRenderingContext) issues.push('WebGL not supported');
-    if (!document.createElement('canvas').getContext) issues.push('Canvas not supported');
+    // Check required APIs for communication
+    if (!window.WebSocket && !window.io) issues.push('WebSocket not supported');
 
     // Check browser versions
     const userAgent = navigator.userAgent;
@@ -75,28 +67,6 @@ function App() {
     return { compatible: issues.length === 0, issues };
   };
 
-  const checkMediaPermissions = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' },
-        audio: true
-      });
-      stream.getTracks().forEach(track => track.stop());
-      console.log('✅ Media permissions granted');
-      return true;
-    } catch (error) {
-      console.error('Media permission error:', error);
-      if (error.name === 'NotAllowedError') {
-        throw new Error('Camera/microphone access denied. Please allow permissions and refresh.');
-      } else if (error.name === 'NotFoundError') {
-        throw new Error('Camera or microphone not found. Please connect devices and refresh.');
-      } else if (error.name === 'NotReadableError') {
-        throw new Error('Camera/microphone in use by another application. Please close other apps and refresh.');
-      } else {
-        throw new Error(`Media access error: ${error.message}`);
-      }
-    }
-  };
 
   if (systemError) {
     return (

@@ -1,10 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import axios from 'axios';
-
-// Import Professional WebRTC Service
-import ProfessionalWebRTCService from '../services/professionalWebRTCService';
 
 // Professional CSS animations
 const animations = `
@@ -79,10 +76,6 @@ const CandidateRoom = () => {
 
   // State management
   const [isConnected, setIsConnected] = useState(false);
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null);
-  const [isAudioMuted, setIsAudioMuted] = useState(false);
-  const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [socket, setSocket] = useState(null);
   const [userInfo, setUserInfo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
@@ -91,7 +84,6 @@ const CandidateRoom = () => {
   const [showChat, setShowChat] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-  const [connectionQuality, setConnectionQuality] = useState('good');
   const [notifications, setNotifications] = useState([]);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
   const [interview, setInterview] = useState(null);
@@ -99,20 +91,8 @@ const CandidateRoom = () => {
   const [error, setError] = useState('');
 
   // Refs
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const webrtcServiceRef = useRef(null);
-  const chatRef = useRef(null);
+  const chatRef = React.useRef(null);
 
-  // Initialize Professional WebRTC Service
-  useEffect(() => {
-    webrtcServiceRef.current = new ProfessionalWebRTCService();
-    return () => {
-      if (webrtcServiceRef.current) {
-        webrtcServiceRef.current.cleanup();
-      }
-    };
-  }, []);
 
   useEffect(() => {
     // Check if user is logged in
@@ -177,71 +157,11 @@ const CandidateRoom = () => {
     }
   };
 
-  // Initialize WebRTC service when socket is connected
-  useEffect(() => {
-    if (socket && socket.connected && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
-      initializeWebRTCService(socket).catch(error => {
-        console.error('Failed to initialize WebRTC service:', error);
-        addNotification('Failed to initialize video connection', 'error');
-      });
-    }
-  }, [socket]);
 
-  // Ensure video elements get streams when refs are available
-  useEffect(() => {
-    if (localStream && localVideoRef.current) {
-      console.log('Candidate: Setting local video source...');
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
-
-  useEffect(() => {
-    if (remoteStream && remoteVideoRef.current) {
-      console.log('Candidate: Setting remote video source...');
-      remoteVideoRef.current.srcObject = remoteStream;
-    }
-  }, [remoteStream]);
-
-  const checkAvailableDevices = async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      const audioDevices = devices.filter(device => device.kind === 'audioinput');
-
-      console.log('Available devices:', {
-        video: videoDevices.length,
-        audio: audioDevices.length,
-        total: devices.length
-      });
-
-      return {
-        hasVideo: videoDevices.length > 0,
-        hasAudio: audioDevices.length > 0,
-        videoDevices,
-        audioDevices
-      };
-    } catch (error) {
-      console.error('Failed to enumerate devices:', error);
-      return {
-        hasVideo: false,
-        hasAudio: false,
-        videoDevices: [],
-        audioDevices: []
-      };
-    }
-  };
 
   const initializeConnection = async () => {
     try {
       setConnectionStatus('connecting');
-
-      // Check available devices first
-      const deviceInfo = await checkAvailableDevices();
-      console.log('Device check:', deviceInfo);
-
-      if (!deviceInfo.hasVideo && !deviceInfo.hasAudio) {
-        addNotification('No camera or microphone detected. Please connect devices and refresh.', 'warning');
-      }
 
       // Initialize socket connection
       const newSocket = io(import.meta.env.VITE_SOCKET_URL, {
@@ -256,13 +176,6 @@ const CandidateRoom = () => {
       // Set up socket event listeners
       setupSocketListeners(newSocket);
 
-      // Get user media with device-aware constraints
-      await initializeLocalStream();
-
-      setConnectionStatus('connecting');
-      // Note: WebRTC initialization will happen in socket 'connect' event
-      // Connection status will be updated to 'connected' after WebRTC is ready
-
     } catch (error) {
       console.error('Connection initialization failed:', error);
       setConnectionStatus('failed');
@@ -274,14 +187,10 @@ const CandidateRoom = () => {
     socket.on('connect', () => {
       console.log('Socket connected');
       socket.emit('join-room', { sessionId, role: 'candidate' });
-      
-      // Initialize WebRTC service after socket is connected
-      if (webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
-        initializeWebRTCService(socket).catch(error => {
-          console.error('Failed to initialize WebRTC service after socket connection:', error);
-          addNotification('Failed to initialize video connection', 'error');
-        });
-      }
+      setConnectionStatus('connected');
+      setIsConnected(true);
+      setSessionStartTime(new Date());
+      addNotification('Connected to interview session', 'success');
     });
 
     socket.on('disconnect', () => {
@@ -299,31 +208,6 @@ const CandidateRoom = () => {
       console.log('Interviewer left the session');
       setConnectionStatus('interviewer-disconnected');
       addNotification('Interviewer has left the session', 'warning');
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-      }
-      setRemoteStream(null);
-    });
-
-    socket.on('offer', async (offer) => {
-      console.log('Received offer from interviewer');
-      if (webrtcServiceRef.current) {
-        await webrtcServiceRef.current.handleOffer(offer);
-      }
-    });
-
-    socket.on('answer', async (answer) => {
-      console.log('Received answer from interviewer');
-      if (webrtcServiceRef.current) {
-        await webrtcServiceRef.current.handleAnswer(answer);
-      }
-    });
-
-    socket.on('ice-candidate', async (candidate) => {
-      console.log('Candidate: Received ICE candidate from interviewer');
-      if (webrtcServiceRef.current) {
-        await webrtcServiceRef.current.handleIceCandidate(candidate);
-      }
     });
 
     socket.on('chat-message', (message) => {
@@ -340,306 +224,6 @@ const CandidateRoom = () => {
       alert('Interview session has been ended by the interviewer');
       navigate('/');
     });
-  };
-
-  const initializeLocalStream = async () => {
-    try {
-      console.log('Requesting media devices...');
-
-      // Try different constraint configurations with fallbacks
-      const constraints = [
-        // Ideal constraints
-        {
-          video: {
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            facingMode: 'user',
-            frameRate: { ideal: 30, max: 30 }
-          },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        },
-        // Fallback 1: Basic HD
-        {
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user'
-          },
-          audio: true
-        },
-        // Fallback 2: Very basic
-        {
-          video: true,
-          audio: true
-        },
-        // Fallback 3: Audio only
-        {
-          audio: true
-        }
-      ];
-
-      let stream = null;
-      let lastError = null;
-
-      for (let i = 0; i < constraints.length; i++) {
-        try {
-          console.log(`Trying constraint set ${i + 1}:`, constraints[i]);
-          stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
-          console.log('Stream acquired with constraint set', i + 1);
-          break;
-        } catch (error) {
-          console.warn(`Constraint set ${i + 1} failed:`, error.name, error.message);
-          lastError = error;
-
-          // If this is a permission denied error, don't try other constraints
-          if (error.name === 'NotAllowedError') {
-            throw error;
-          }
-        }
-      }
-
-      if (!stream) {
-        console.error('All constraint sets failed');
-        throw lastError || new Error('Failed to get media stream');
-      }
-
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-
-      // Log stream details
-      const videoTracks = stream.getVideoTracks();
-      const audioTracks = stream.getAudioTracks();
-      console.log('Local stream initialized:', {
-        video: videoTracks.length > 0 ? videoTracks[0].getSettings() : 'No video',
-        audio: audioTracks.length > 0 ? audioTracks[0].getSettings() : 'No audio'
-      });
-
-      // Add notification based on what we got
-      if (videoTracks.length > 0 && audioTracks.length > 0) {
-        addNotification('Camera and microphone connected', 'success');
-      } else if (audioTracks.length > 0) {
-        addNotification('Microphone connected (no camera)', 'warning');
-      } else {
-        addNotification('No media devices available', 'error');
-      }
-
-    } catch (error) {
-      console.error('Failed to get user media:', error);
-
-      let errorMessage = 'Failed to access camera/microphone: ';
-      if (error.name === 'NotAllowedError') {
-        errorMessage += 'Permission denied. Please allow camera and microphone access.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage += 'No camera or microphone found. Please connect devices and refresh.';
-      } else if (error.name === 'NotReadableError') {
-        errorMessage += 'Camera/microphone in use by another application.';
-      } else {
-        errorMessage += error.message;
-      }
-
-      addNotification(errorMessage, 'error');
-      throw error;
-    }
-  };
-
-  const initializeWebRTCService = async (socketInstance = socket) => {
-    try {
-      console.log('🚀 Initializing Professional WebRTC Service for Candidate...');
-      console.log('Socket instance passed:', socketInstance ? 'valid' : 'null');
-
-      const service = webrtcServiceRef.current;
-
-      // Set up event handlers
-      service.onRemoteStream = (remoteStream) => {
-        console.log('📹 CANDIDATE: Received remote stream from interviewer');
-        setRemoteStream(remoteStream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-          // Ensure audio is audible
-          try { remoteVideoRef.current.muted = false; } catch {}
-          remoteVideoRef.current.play?.().catch((e) => {
-            console.warn('Autoplay with sound blocked, waiting for user gesture to start audio.', e?.message);
-            addNotification('Click anywhere to enable audio if muted by browser.', 'info');
-          });
-          console.log('📹 Set remote video srcObject successfully');
-        }
-        addNotification('Video connection established with interviewer', 'success');
-      };
-
-      service.onConnectionEstablished = () => {
-        console.log('✅ WebRTC connection established');
-        addNotification('Video connection established', 'success');
-      };
-
-      service.onConnectionLost = () => {
-        console.log('⚠️ WebRTC connection lost');
-        addNotification('Connection lost, attempting to reconnect...', 'warning');
-      };
-
-      service.onError = (error) => {
-        console.error('🚨 WebRTC Error:', error);
-        addNotification(`Connection error: ${error.message}`, 'error');
-      };
-
-      // Initialize the service
-      await service.initialize(socketInstance);
-
-      // Get local stream and set it to video element
-      const stream = service.localStream;
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-
-      // Create peer connection
-      await service.createPeerConnection();
-
-      // Signal that candidate is ready
-      setTimeout(() => {
-        console.log('Candidate: Signaling ready for WebRTC...');
-        socketInstance.emit('candidate-ready', { sessionId });
-      }, 1000);
-
-      console.log('✅ WebRTC service initialized successfully');
-      
-      // Update connection status after successful WebRTC initialization
-      setConnectionStatus('connected');
-      setIsConnected(true);
-      setSessionStartTime(new Date());
-      addNotification('Connection established successfully', 'success');
-    } catch (error) {
-      console.error('❌ Failed to initialize WebRTC service:', error);
-      setConnectionStatus('failed');
-      addNotification('Failed to initialize video connection', 'error');
-      throw error;
-    }
-  };
-
-  // Handle offer is now managed by the Professional WebRTC Service
-
-  const toggleAudio = async () => {
-    if (!localStream) {
-      addNotification('No microphone stream available', 'error');
-      return;
-    }
-
-    try {
-      const audioTrack = localStream.getAudioTracks()[0];
-      if (audioTrack && audioTrack.readyState === 'live') {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsAudioMuted(!audioTrack.enabled);
-      } else {
-        // Need to get a fresh audio track
-        console.log('🔄 Getting new microphone stream...');
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const newAudioTrack = audioStream.getAudioTracks()[0];
-        if (newAudioTrack) {
-          const oldAudioTrack = audioTrack || localStream.getAudioTracks()[0];
-          if (oldAudioTrack) {
-            localStream.removeTrack(oldAudioTrack);
-            try { oldAudioTrack.stop(); } catch {}
-          }
-          localStream.addTrack(newAudioTrack);
-          if (webrtcServiceRef.current && webrtcServiceRef.current.isConnected()) {
-            await webrtcServiceRef.current.replaceAudioTrack(newAudioTrack);
-          }
-          setIsAudioMuted(false);
-          addNotification('Microphone turned on', 'success');
-          console.log('✅ Microphone restarted with new track');
-        }
-      }
-    } catch (err) {
-      console.error('❌ Failed to toggle microphone:', err);
-      addNotification('Failed to toggle microphone: ' + err.message, 'error');
-    }
-  };
-
-  const toggleVideo = async () => {
-    if (!localStream) {
-      addNotification('No camera stream available', 'error');
-      return;
-    }
-
-    try {
-      if (isVideoMuted) {
-        // Camera is currently off, turn it on
-        console.log('🔄 Turning camera ON...');
-
-        // Check if we have a video track that can be enabled
-        const existingVideoTrack = localStream.getVideoTracks()[0];
-        if (existingVideoTrack && existingVideoTrack.readyState === 'live') {
-          // Simply enable the existing track
-          existingVideoTrack.enabled = true;
-          setIsVideoMuted(false);
-          addNotification('Camera turned on', 'success');
-          console.log('✅ Camera enabled using existing track');
-        } else {
-          // Need to get a new video track
-          console.log('🔄 Getting new camera stream...');
-
-          try {
-            const videoStream = await navigator.mediaDevices.getUserMedia({
-              video: {
-                width: { ideal: 640, max: 1280 },
-                height: { ideal: 480, max: 720 },
-                frameRate: { ideal: 15, max: 30 },
-                facingMode: 'user'
-              }
-            });
-
-            // Replace the video track in the existing stream
-            const newVideoTrack = videoStream.getVideoTracks()[0];
-            if (newVideoTrack) {
-              // Remove old video track if exists
-              const oldVideoTrack = localStream.getVideoTracks()[0];
-              if (oldVideoTrack) {
-                localStream.removeTrack(oldVideoTrack);
-                oldVideoTrack.stop();
-              }
-
-              // Add new video track
-              localStream.addTrack(newVideoTrack);
-
-              // Update video element
-              if (localVideoRef.current) {
-                localVideoRef.current.srcObject = localStream;
-              }
-
-              // Update peer connection if connected
-              if (webrtcServiceRef.current && webrtcServiceRef.current.isConnected()) {
-                await webrtcServiceRef.current.replaceVideoTrack(newVideoTrack);
-              }
-
-              setIsVideoMuted(false);
-              addNotification('Camera turned on', 'success');
-              console.log('✅ Camera restarted with new track');
-            }
-          } catch (error) {
-            console.error('❌ Failed to restart camera:', error);
-            addNotification('Failed to turn on camera: ' + error.message, 'error');
-          }
-        }
-      } else {
-        // Camera is currently on, turn it off
-        console.log('🔄 Turning camera OFF...');
-        const videoTrack = localStream.getVideoTracks()[0];
-        if (videoTrack) {
-          videoTrack.enabled = false;
-          setIsVideoMuted(true);
-          addNotification('Camera turned off', 'info');
-          console.log('✅ Camera disabled');
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error toggling video:', error);
-      addNotification('Error toggling camera: ' + error.message, 'error');
-    }
   };
 
   const sendMessage = () => {
@@ -671,9 +255,6 @@ const CandidateRoom = () => {
   };
 
   const cleanup = () => {
-    if (webrtcServiceRef.current) {
-      webrtcServiceRef.current.cleanup();
-    }
     if (socket) {
       socket.disconnect();
     }
@@ -690,27 +271,6 @@ const CandidateRoom = () => {
     return () => clearInterval(interval);
   }, [sessionStartTime, isConnected]);
 
-  // Connection quality monitoring
-  useEffect(() => {
-    if (webrtcServiceRef.current && webrtcServiceRef.current.isConnected()) {
-      const interval = setInterval(async () => {
-        const stats = await webrtcServiceRef.current.getConnectionStats();
-        if (stats && stats.inboundVideo) {
-          const { packetsLost = 0, packetsReceived = 0 } = stats.inboundVideo;
-          const lossRate = packetsReceived > 0 ? packetsLost / packetsReceived : 0;
-
-          if (lossRate > 0.05) {
-            setConnectionQuality('poor');
-          } else if (lossRate > 0.02) {
-            setConnectionQuality('fair');
-          } else {
-            setConnectionQuality('good');
-          }
-        }
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [webrtcServiceRef.current]);
 
   // Auto-remove notifications after 5 seconds
   useEffect(() => {
@@ -735,13 +295,6 @@ const CandidateRoom = () => {
     }
   }, [messages]);
 
-  // Update video element when local stream changes
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-      console.log('Video element updated with new stream');
-    }
-  }, [localStream]);
 
   const addNotification = (message, type = 'info') => {
     const notification = {
@@ -764,14 +317,6 @@ const CandidateRoom = () => {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getConnectionQualityColor = () => {
-    switch (connectionQuality) {
-      case 'good': return '#4CAF50';
-      case 'fair': return '#FF9800';
-      case 'poor': return '#f44336';
-      default: return '#4CAF50';
-    }
-  };
 
   const styles = {
     container: {
@@ -842,57 +387,53 @@ const CandidateRoom = () => {
       padding: '24px',
       gap: '24px'
     },
-    videoContainer: {
+    interviewContainer: {
       flex: 1,
       position: 'relative',
-      background: '#1f2937',
+      background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
       borderRadius: '8px',
       overflow: 'hidden',
-      border: '1px solid #374151',
-      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+      border: '1px solid #e2e8f0',
+      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+      display: 'flex',
+      flexDirection: 'column'
     },
-    remoteVideo: {
-      width: '100%',
-      height: '100%',
-      objectFit: 'cover'
+    connectionStatus: {
+      padding: '20px',
+      borderBottom: '1px solid #e2e8f0',
+      background: '#f8fafc'
     },
-    localVideoContainer: {
-      position: 'absolute',
-      top: '24px',
-      right: '24px',
-      width: '240px',
-      height: '180px',
-      borderRadius: '8px',
-      overflow: 'hidden',
-      border: '2px solid #ffffff',
-      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)',
-      zIndex: 20
-    },
-    localVideo: {
-      width: '100%',
-      height: '100%',
-      objectFit: 'cover',
-      transform: 'scaleX(-1)' // Mirror effect
-    },
-    noVideo: {
+    connectionInfo: {
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column',
-      width: '100%',
-      height: '100%',
-      background: '#374151',
-      color: '#9ca3af',
-      gap: '16px'
-    },
-    noVideoIcon: {
-      fontSize: '48px',
-      opacity: 0.6
-    },
-    noVideoText: {
+      gap: '12px',
       fontSize: '16px',
-      fontWeight: '500',
+      fontWeight: '500'
+    },
+    statusIndicator: {
+      fontSize: '12px'
+    },
+    retryButton: {
+      marginLeft: '12px',
+      padding: '6px 12px',
+      background: '#3b82f6',
+      color: 'white',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontSize: '12px'
+    },
+    interviewContent: {
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '40px',
       textAlign: 'center'
+    },
+    welcomeMessage: {
+      marginBottom: '40px'
     },
     chatPanel: {
       width: showChat ? '320px' : '0',
@@ -952,13 +493,8 @@ const CandidateRoom = () => {
       outline: 'none'
     },
     controls: {
-      position: 'absolute',
-      bottom: '32px',
-      left: '50%',
-      transform: 'translateX(-50%)',
       display: 'flex',
       gap: '16px',
-      zIndex: 30,
       alignItems: 'center',
       justifyContent: 'center',
       padding: '20px 24px',
@@ -983,26 +519,6 @@ const CandidateRoom = () => {
       background: '#ffffff',
       color: '#374151',
       padding: '0 16px'
-    },
-    muteButton: {
-      background: isAudioMuted
-        ? 'linear-gradient(135deg, #fecaca, #fef2f2)'
-        : 'linear-gradient(135deg, #bbf7d0, #f0fdf4)',
-      border: `2px solid ${isAudioMuted ? '#ef4444' : '#22c55e'}`,
-      color: isAudioMuted ? '#dc2626' : '#16a34a',
-      boxShadow: isAudioMuted
-        ? '0 4px 12px rgba(239, 68, 68, 0.2)'
-        : '0 4px 12px rgba(34, 197, 94, 0.2)'
-    },
-    videoButton: {
-      background: isVideoMuted
-        ? 'linear-gradient(135deg, #fecaca, #fef2f2)'
-        : 'linear-gradient(135deg, #bbf7d0, #f0fdf4)',
-      border: `2px solid ${isVideoMuted ? '#ef4444' : '#22c55e'}`,
-      color: isVideoMuted ? '#dc2626' : '#16a34a',
-      boxShadow: isVideoMuted
-        ? '0 4px 12px rgba(239, 68, 68, 0.2)'
-        : '0 4px 12px rgba(34, 197, 94, 0.2)'
     },
     chatButton: {
       background: showChat
@@ -1076,17 +592,6 @@ const CandidateRoom = () => {
     infoValue: {
       fontWeight: '600',
       color: '#1a202c'
-    },
-    connectionQuality: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px'
-    },
-    qualityDot: {
-      width: '8px',
-      height: '8px',
-      borderRadius: '50%',
-      backgroundColor: getConnectionQualityColor()
     },
     notifications: {
       position: 'fixed',
@@ -1297,185 +802,78 @@ const CandidateRoom = () => {
             </div>
             <div style={styles.infoItem}>
               <span style={styles.infoLabel}>Connection:</span>
-              <div style={styles.connectionQuality}>
-                <div style={styles.qualityDot}></div>
-                <span style={styles.infoValue}>
-                  {connectionQuality.charAt(0).toUpperCase() + connectionQuality.slice(1)}
-                </span>
-              </div>
-            </div>
-            <div style={styles.infoItem}>
-              <span style={styles.infoLabel}>Audio:</span>
-              <span style={styles.infoValue}>{isAudioMuted ? 'Muted' : 'Active'}</span>
-            </div>
-            <div style={styles.infoItem}>
-              <span style={styles.infoLabel}>Video:</span>
-              <span style={styles.infoValue}>{isVideoMuted ? 'Disabled' : 'Active'}</span>
+              <span style={styles.infoValue}>Active</span>
             </div>
           </div>
         </div>
 
-        {/* Video Container */}
-        <div style={styles.videoContainer}>
-          {/* Remote Video (Interviewer) */}
-          {remoteStream ? (
-            <video
-              ref={remoteVideoRef}
-              style={styles.remoteVideo}
-              autoPlay
-              playsInline
-            />
-          ) : (
-            <div style={styles.noVideo}>
-              👤
-              <div style={{
-                position: 'absolute',
-                fontSize: '16px',
-                bottom: '50px',
-                textAlign: 'center',
-                width: '100%',
-                color: '#9ca3af'
-              }}>
-                Waiting for interviewer to join
+        {/* Interview Interface */}
+        <div style={styles.interviewContainer}>
+          {/* Connection Status */}
+          <div style={styles.connectionStatus}>
+            {connectionStatus === 'connected' && (
+              <div style={styles.connectionInfo}>
+                <div style={styles.statusIndicator}>🟢</div>
+                <span>Connected to Interview Session</span>
               </div>
-            </div>
-          )}
-
-          {/* Connection Failed Message */}
-          {connectionStatus === 'failed' && (
-            <div style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              textAlign: 'center',
-              background: 'rgba(244, 67, 54, 0.9)',
-              color: 'white',
-              padding: '20px',
-              borderRadius: '8px',
-              zIndex: 30
-            }}>
-              <div style={{ fontSize: '18px', marginBottom: '12px' }}>
-                ⚠️ Connection Failed
+            )}
+            {connectionStatus === 'interviewer-connected' && (
+              <div style={styles.connectionInfo}>
+                <div style={styles.statusIndicator}>🟢</div>
+                <span>Interviewer is Online</span>
               </div>
-              <div style={{ fontSize: '14px', marginBottom: '16px' }}>
-                Unable to connect to the session. Please check your camera and microphone permissions.
+            )}
+            {connectionStatus === 'interviewer-disconnected' && (
+              <div style={styles.connectionInfo}>
+                <div style={styles.statusIndicator}>🟡</div>
+                <span>Waiting for Interviewer</span>
               </div>
-              <button
-                style={{
-                  background: '#ffffff',
-                  color: '#f44336',
-                  border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-                onClick={() => {
-                  setConnectionStatus('connecting');
-                  initializeConnection();
-                }}
-              >
-                🔄 Retry Connection
-              </button>
-            </div>
-          )}
-
-          {/* Local Video (Self) */}
-          <div style={styles.localVideoContainer}>
-            {localStream && !isVideoMuted ? (
-              <video
-                ref={localVideoRef}
-                style={styles.localVideo}
-                autoPlay
-                muted
-                playsInline
-                onLoadedMetadata={() => {
-                  console.log('Local video loaded successfully');
-                }}
-                onError={(e) => {
-                  console.error('Local video error:', e);
-                  addNotification('Video display error', 'error');
-                }}
-                onCanPlay={() => {
-                  console.log('Local video can play');
-                }}
-                onPlay={() => {
-                  console.log('Local video started playing');
-                }}
-              />
-            ) : (
-              <div style={styles.noVideo}>
-                <div style={{ fontSize: '24px', marginBottom: '8px' }}>📷</div>
-                <div style={{ fontSize: '12px', color: '#666' }}>
-                  {isVideoMuted ? 'Camera Off' : localStream ? 'Camera Initializing...' : 'No Camera'}
-                </div>
-                {isVideoMuted && (
-                  <button
-                    style={{
-                      marginTop: '8px',
-                      padding: '4px 8px',
-                      backgroundColor: '#3498db',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '10px',
-                      cursor: 'pointer'
-                    }}
-                    onClick={toggleVideo}
-                  >
-                    Turn On
-                  </button>
-                )}
+            )}
+            {connectionStatus === 'failed' && (
+              <div style={styles.connectionInfo}>
+                <div style={styles.statusIndicator}>🔴</div>
+                <span>Connection Failed</span>
+                <button
+                  style={styles.retryButton}
+                  onClick={() => {
+                    setConnectionStatus('connecting');
+                    initializeConnection();
+                  }}
+                >
+                  🔄 Retry
+                </button>
               </div>
             )}
           </div>
 
-          {/* Controls */}
-          <div style={styles.controls} className="controls-mobile">
-            <button
-              className="control-button control-button-mobile"
-              style={{...styles.controlButton, ...styles.muteButton}}
-              onClick={toggleAudio}
-              title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
-            >
-              <span style={{ fontSize: '16px' }}>
-                {isAudioMuted ? '🔇' : '🎤'}
-              </span>
-              {isAudioMuted ? 'Unmute' : 'Mute'}
-            </button>
+          {/* Interview Content */}
+          <div style={styles.interviewContent}>
+            <div style={styles.welcomeMessage}>
+              <h2>Welcome to your Interview Session</h2>
+              <p>You are connected to session: <strong>{sessionId}</strong></p>
+              <p>Use the chat feature to communicate with your interviewer.</p>
+            </div>
 
-            <button
-              className="control-button control-button-mobile"
-              style={{...styles.controlButton, ...styles.videoButton}}
-              onClick={toggleVideo}
-              title={isVideoMuted ? 'Turn on camera' : 'Turn off camera'}
-            >
-              <span style={{ fontSize: '16px' }}>
-                {isVideoMuted ? '📷' : '📹'}
-              </span>
-              {isVideoMuted ? 'Start Video' : 'Stop Video'}
-            </button>
+            {/* Controls */}
+            <div style={styles.controls}>
+              <button
+                style={{...styles.controlButton, ...styles.chatButton}}
+                onClick={() => setShowChat(!showChat)}
+                title={showChat ? 'Hide chat' : 'Show chat'}
+              >
+                <span style={{ fontSize: '16px' }}>💬</span>
+                {showChat ? 'Hide Chat' : 'Show Chat'}
+              </button>
 
-            <button
-              className="control-button control-button-mobile"
-              style={{...styles.controlButton, ...styles.chatButton}}
-              onClick={() => setShowChat(!showChat)}
-              title={showChat ? 'Hide chat' : 'Show chat'}
-            >
-              <span style={{ fontSize: '16px' }}>💬</span>
-              {showChat ? 'Hide Chat' : 'Show Chat'}
-            </button>
-
-            <button
-              className="control-button control-button-mobile"
-              style={{...styles.controlButton, ...styles.leaveButton}}
-              onClick={leaveSession}
-              title="Leave interview session"
-            >
-              <span style={{ fontSize: '16px' }}>🚪</span>
-              Leave Session
-            </button>
+              <button
+                style={{...styles.controlButton, ...styles.leaveButton}}
+                onClick={leaveSession}
+                title="Leave interview session"
+              >
+                <span style={{ fontSize: '16px' }}>🚪</span>
+                Leave Session
+              </button>
+            </div>
           </div>
         </div>
 
