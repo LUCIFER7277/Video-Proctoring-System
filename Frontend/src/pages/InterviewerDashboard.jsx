@@ -609,12 +609,21 @@ const InterviewerDashboard = () => {
     if (window.confirm('Are you sure you want to end the interview session?')) {
       try {
         setLoading(true);
+        console.log('Ending interview session:', sessionId);
 
         // End the interview session in backend
-        await axios.post(`/api/interviews/${sessionId}/end`);
+        const endUrl = `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}/end`;
+        console.log('Ending session with URL:', endUrl);
+        
+        const endResponse = await axios.post(endUrl);
+        console.log('End session response:', endResponse.data);
 
         // Generate report
-        await axios.get(`/api/interviews/${sessionId}/report`);
+        const reportUrl = `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}/report`;
+        console.log('Generating report with URL:', reportUrl);
+        
+        const reportResponse = await axios.get(reportUrl);
+        console.log('Report generation response:', reportResponse.data);
 
         // Notify via socket
         if (socket) {
@@ -625,7 +634,22 @@ const InterviewerDashboard = () => {
         navigate(`/report/${sessionId}`);
       } catch (error) {
         console.error('Error ending session:', error);
-        setError('Failed to end session properly');
+        console.error('Error details:', {
+          message: error.message,
+          status: error.response?.status,
+          data: error.response?.data,
+          url: error.config?.url
+        });
+        
+        if (error.response?.status === 405) {
+          setError('Method not allowed. Please check the server configuration.');
+        } else if (error.response?.status === 404) {
+          setError('Interview session not found.');
+        } else if (error.response?.status === 500) {
+          setError('Server error. Please try again.');
+        } else {
+          setError(`Failed to end session: ${error.message}`);
+        }
         setLoading(false);
       }
     }

@@ -69,6 +69,9 @@ const startInterview = async (req, res) => {
 const endInterview = async (req, res) => {
   try {
     const { sessionId } = req.params;
+    console.log('Ending interview for sessionId:', sessionId);
+    console.log('Request method:', req.method);
+    console.log('Request headers:', req.headers);
 
     const interview = await Interview.findOne({ sessionId });
     if (!interview) {
