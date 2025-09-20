@@ -33,12 +33,21 @@ const EnhancedInterview = () => {
   });
   const [videoStatus, setVideoStatus] = useState({ hasStream: false, isPlaying: false });
 
+  // User role and stream management
+  const [userRole, setUserRole] = useState(null); // 'candidate' or 'interviewer'
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [candidateStream, setCandidateStream] = useState(null); // The stream to monitor for focus detection
+
   // Service status
   const [serviceStats, setServiceStats] = useState({
     focusEvents: 0,
     objectEvents: 0,
     totalEvents: 0,
-    violations: 0
+    violations: 0,
+    focusLossCount: 0, // Track total focus loss incidents
+    lookingAwayCount: 0, // Track looking away incidents
+    noFaceCount: 0 // Track no face detected incidents
   });
 
   // Refs
@@ -46,6 +55,43 @@ const EnhancedInterview = () => {
   const focusCanvasRef = useRef(null);
   const objectCanvasRef = useRef(null);
   const timeIntervalRef = useRef(null);
+
+  // Function to detect user role based on URL params or user data
+  const detectUserRole = async () => {
+    try {
+      // Get user info from localStorage or API
+      const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
+
+      // Check if role is specified in URL params
+      const urlParams = new URLSearchParams(window.location.search);
+      const roleParam = urlParams.get('role');
+
+      if (roleParam && ['candidate', 'interviewer'].includes(roleParam)) {
+        setUserRole(roleParam);
+        console.log('Role detected from URL:', roleParam);
+        return roleParam;
+      }
+
+      // Check user info for role
+      if (userInfo.role) {
+        setUserRole(userInfo.role);
+        console.log('Role detected from user info:', userInfo.role);
+        return userInfo.role;
+      }
+
+      // Default to candidate if accessing /interview/:sessionId without role
+      const defaultRole = 'candidate';
+      setUserRole(defaultRole);
+      console.log('Using default role:', defaultRole);
+      return defaultRole;
+
+    } catch (error) {
+      console.error('Error detecting user role:', error);
+      // Default to candidate on error
+      setUserRole('candidate');
+      return 'candidate';
+    }
+  };
 
   // Service instances
   const focusServiceRef = useRef(new FocusDetectionService());
@@ -270,6 +316,10 @@ const EnhancedInterview = () => {
 
   const initializeDetectionServices = async () => {
     try {
+      // Detect user role first
+      const role = await detectUserRole();
+      console.log('🎭 User role detected:', role);
+
       // First ensure all DOM elements are available
       console.log('🔍 Checking DOM elements availability...');
       let attempts = 0;
@@ -304,8 +354,22 @@ const EnhancedInterview = () => {
       });
       console.log('✅ Camera access granted');
 
+      // Store the local stream
+      setLocalStream(stream);
+
+      // For candidates: display their own stream and monitor it
+      // For interviewers: display their own stream but will monitor candidate's remote stream later
       videoRef.current.srcObject = stream;
       setVideoStatus(prev => ({ ...prev, hasStream: true }));
+
+      // Set candidate stream for monitoring based on role
+      if (role === 'candidate') {
+        setCandidateStream(stream);
+        console.log('🎯 Will monitor candidate (self) stream for focus detection');
+      } else {
+        console.log('🎯 Interviewer mode - will monitor candidate remote stream when available');
+        // For interviewers, we'll set candidateStream when remote stream becomes available
+      }
 
       await new Promise((resolve, reject) => {
         videoRef.current.onloadedmetadata = () => {
@@ -356,8 +420,24 @@ const EnhancedInterview = () => {
 
       // Initialize focus detection service
       try {
-        await focusServiceRef.current.initialize(videoRef.current, focusCanvasRef.current);
-        setSystemStatus(prev => ({ ...prev, focusDetection: true }));
+        // Only initialize focus detection if we have a candidate stream to monitor
+        if (candidateStream || role === 'candidate') {
+          const streamToMonitor = candidateStream || stream; // Use candidateStream if available, fallback to current stream
+
+          // Create a video element for the stream we want to monitor
+          const monitoringVideo = document.createElement('video');
+          monitoringVideo.srcObject = streamToMonitor;
+          monitoringVideo.muted = true;
+          monitoringVideo.autoplay = true;
+          monitoringVideo.playsInline = true;
+
+          await focusServiceRef.current.initialize(monitoringVideo, focusCanvasRef.current);
+          setSystemStatus(prev => ({ ...prev, focusDetection: true }));
+
+          console.log('🎯 Focus detection initialized for', role === 'candidate' ? 'candidate (self)' : 'candidate (remote)');
+        } else {
+          console.log('⏸️ Focus detection skipped - no candidate stream available yet');
+        }
 
         focusServiceRef.current.addEventListener(handleFocusEvent);
 
@@ -466,10 +546,28 @@ const EnhancedInterview = () => {
   const handleFocusEvent = useCallback((event) => {
     eventLoggingService.logFocusEvent(event);
 
+    // Count specific focus loss types
+    let focusLossIncrement = 0;
+    let lookingAwayIncrement = 0;
+    let noFaceIncrement = 0;
+
+    if (event.type === 'looking_away') {
+      focusLossIncrement = 1;
+      lookingAwayIncrement = 1;
+    } else if (event.type === 'no_face_detected') {
+      focusLossIncrement = 1;
+      noFaceIncrement = 1;
+    } else if (event.type === 'multiple_faces_detected') {
+      focusLossIncrement = 1;
+    }
+
     setServiceStats(prev => ({
       ...prev,
       focusEvents: prev.focusEvents + 1,
-      totalEvents: prev.totalEvents + 1
+      totalEvents: prev.totalEvents + 1,
+      focusLossCount: prev.focusLossCount + focusLossIncrement,
+      lookingAwayCount: prev.lookingAwayCount + lookingAwayIncrement,
+      noFaceCount: prev.noFaceCount + noFaceIncrement
     }));
 
     // Update focus status
@@ -706,8 +804,15 @@ const EnhancedInterview = () => {
       // End session in event logging
       eventLoggingService.endSession();
 
-      // Send final data to backend
-      await axios.post(`/api/interviews/${sessionId}/end`);
+      // Send final data to backend with focus loss counts
+      await axios.post(`/api/interviews/${sessionId}/end`, {
+        focusLossCount: serviceStats.focusLossCount,
+        lookingAwayCount: serviceStats.lookingAwayCount,
+        noFaceCount: serviceStats.noFaceCount,
+        totalViolations: violations.length,
+        eventSummary,
+        violationReport
+      });
 
       // Generate interview report
       await axios.get(`/api/interviews/${sessionId}/report`);
@@ -1081,6 +1186,11 @@ const EnhancedInterview = () => {
             <div>Object Events: {serviceStats.objectEvents}</div>
             <div>Total Violations: {serviceStats.violations}</div>
             <div>Total Events: {serviceStats.totalEvents}</div>
+            <div style={{ color: serviceStats.focusLossCount > 0 ? '#e74c3c' : '#27ae60' }}>
+              Focus Losses: {serviceStats.focusLossCount}
+            </div>
+            <div>Looking Away Count: {serviceStats.lookingAwayCount}</div>
+            <div>No Face Detected: {serviceStats.noFaceCount}</div>
           </div>
 
           {/* Recent Violations */}
