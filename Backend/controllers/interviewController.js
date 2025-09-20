@@ -130,6 +130,19 @@ const getInterview = async (req, res) => {
       });
     }
 
+    // Recalculate counts to ensure accuracy
+    const violationCount = await Violation.countDocuments({ sessionId });
+    const focusLostCount = await Violation.countDocuments({
+      sessionId,
+      type: { $in: ['focus_lost', 'looking_away', 'no_face_detected'] }
+    });
+
+    // Update interview with accurate counts
+    interview.violationCount = violationCount;
+    interview.focusLostCount = focusLostCount;
+    interview.calculateIntegrityScore();
+    await interview.save();
+
     const violations = await Violation.find({ sessionId }).sort({ timestamp: 1 });
     const violationSummary = await Violation.getViolationSummary(interview._id);
 

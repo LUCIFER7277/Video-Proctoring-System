@@ -24,7 +24,7 @@ const ReportGenerator = () => {
   // Refs for cleanup
   const abortController = useRef(new AbortController());
 
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api';
 
   // Cleanup function
   const cleanup = useCallback(() => {

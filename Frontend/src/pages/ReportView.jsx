@@ -33,16 +33,10 @@ const ReportView = () => {
       const interviewResponse = await axios.get(`${API_BASE_URL}/interviews/${sessionId}`);
 
       if (interviewResponse.data.success) {
-        // Fix response structure - backend returns nested data
-        const interviewData = interviewResponse.data.data?.interview || interviewResponse.data.interview;
-        setInterview(interviewData);
-
-        // Get violation summary
-        const violationsResponse = await axios.get(`${API_BASE_URL}/violations/session/${sessionId}/summary`);
-
-        if (violationsResponse.data.success) {
-          setViolationSummary(violationsResponse.data);
-        }
+        // Backend returns data: { interview, violations, violationSummary }
+        const responseData = interviewResponse.data.data;
+        setInterview(responseData.interview);
+        setViolationSummary(responseData.violationSummary);
       } else {
         setError('Interview not found');
       }
@@ -384,16 +378,16 @@ const ReportView = () => {
             <div style={styles.cardTitle}>Integrity Score</div>
             <div style={{
               ...styles.metric,
-              color: getIntegrityColor(interview.integrityScore)
+              color: getIntegrityColor(interview.integrityScore || 0)
             }}>
-              {interview.integrityScore}/100
+              {interview.integrityScore || 0}/100
             </div>
             <div style={styles.metricLabel}>
               <span style={{
                 ...styles.statusBadge,
-                backgroundColor: getIntegrityColor(interview.integrityScore)
+                backgroundColor: getIntegrityColor(interview.integrityScore || 0)
               }}>
-                {getIntegrityStatus(interview.integrityScore)}
+                {getIntegrityStatus(interview.integrityScore || 0)}
               </span>
             </div>
           </div>
@@ -402,9 +396,9 @@ const ReportView = () => {
             <div style={styles.cardTitle}>Total Violations</div>
             <div style={{
               ...styles.metric,
-              color: interview.violationCount < 3 ? '#27ae60' : interview.violationCount < 6 ? '#f39c12' : '#e74c3c'
+              color: (interview.violationCount || 0) < 3 ? '#27ae60' : (interview.violationCount || 0) < 6 ? '#f39c12' : '#e74c3c'
             }}>
-              {interview.violationCount}
+              {interview.violationCount || 0}
             </div>
             <div style={styles.metricLabel}>Across all categories</div>
           </div>
@@ -413,9 +407,9 @@ const ReportView = () => {
             <div style={styles.cardTitle}>Focus Lost Count</div>
             <div style={{
               ...styles.metric,
-              color: interview.focusLostCount < 3 ? '#27ae60' : interview.focusLostCount < 6 ? '#f39c12' : '#e74c3c'
+              color: (interview.focusLostCount || 0) < 3 ? '#27ae60' : (interview.focusLostCount || 0) < 6 ? '#f39c12' : '#e74c3c'
             }}>
-              {interview.focusLostCount}
+              {interview.focusLostCount || 0}
             </div>
             <div style={styles.metricLabel}>Attention lapses</div>
           </div>
@@ -467,10 +461,10 @@ const ReportView = () => {
         </div>
 
         {/* Violation Summary */}
-        {violationSummary && violationSummary.summary && violationSummary.summary.length > 0 && (
+        {violationSummary && violationSummary.length > 0 && (
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>Violation Summary</h2>
-            {violationSummary.summary.map((violation, index) => (
+            {violationSummary.map((violation, index) => (
               <div key={index} style={styles.violationItem}>
                 <div style={styles.violationType}>
                   {violation._id.replace(/_/g, ' ')}
