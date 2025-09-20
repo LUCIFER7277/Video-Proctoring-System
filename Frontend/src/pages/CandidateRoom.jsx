@@ -222,8 +222,8 @@ const CandidateRoom = () => {
       // Set up socket event listeners
       setupSocketListeners(newSocket);
 
-      // Get user media with device-aware constraints
-      await initializeLocalStream();
+      // Note: Local stream will be initialized by WebRTC service
+      // No need to call initializeLocalStream() separately
 
       setConnectionStatus("connected");
       setIsConnected(true);
@@ -423,6 +423,10 @@ const CandidateRoom = () => {
       );
 
       const service = webrtcServiceRef.current;
+      
+      if (!service) {
+        throw new Error("WebRTC service not initialized");
+      }
 
       // Set up event handlers
       service.onRemoteStream = (remoteStream) => {
@@ -471,13 +475,51 @@ const CandidateRoom = () => {
       };
 
       // Initialize the service
+      console.log("🔧 Initializing WebRTC service with socket...");
       await service.initialize(socket);
+      console.log("✅ WebRTC service initialized");
 
       // Get local stream and set it to video element
       const stream = service.localStream;
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+      console.log("📹 Local stream from service:", stream ? "Available" : "Not available");
+      
+      if (stream) {
+        console.log("📊 Stream details:", {
+          id: stream.id,
+          active: stream.active,
+          tracks: stream.getTracks().map(t => ({
+            kind: t.kind,
+            enabled: t.enabled,
+            readyState: t.readyState
+          }))
+        });
+        
+        setLocalStream(stream);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+          console.log("✅ Local video stream set successfully");
+        }
+      } else {
+        console.error("❌ No local stream available from WebRTC service");
+        console.log("🔄 Attempting to get local stream directly...");
+        
+        try {
+          // Fallback: try to get local stream directly
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: true
+          });
+          
+          setLocalStream(fallbackStream);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = fallbackStream;
+            console.log("✅ Fallback local video stream set successfully");
+            addNotification("Camera connected (fallback mode)", "warning");
+          }
+        } catch (fallbackError) {
+          console.error("❌ Fallback stream also failed:", fallbackError);
+          addNotification("Failed to get camera stream", "error");
+        }
       }
 
       // Create peer connection
@@ -724,7 +766,12 @@ const CandidateRoom = () => {
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
-      console.log("Video element updated with new stream");
+      console.log("✅ Video element updated with new stream");
+      
+      // Ensure video plays
+      localVideoRef.current.play().catch(error => {
+        console.warn("Video autoplay failed:", error);
+      });
     }
   }, [localStream]);
 
@@ -1247,6 +1294,24 @@ const CandidateRoom = () => {
                 {isVideoMuted ? "Disabled" : "Active"}
               </span>
             </div>
+            <div style={styles.infoItem}>
+              <span style={styles.infoLabel}>Local Stream:</span>
+              <span style={styles.infoValue}>
+                {localStream ? "Connected" : "Not Connected"}
+              </span>
+            </div>
+            <div style={styles.infoItem}>
+              <span style={styles.infoLabel}>Remote Stream:</span>
+              <span style={styles.infoValue}>
+                {remoteStream ? "Connected" : "Not Connected"}
+              </span>
+            </div>
+            <div style={styles.infoItem}>
+              <span style={styles.infoLabel}>WebRTC Service:</span>
+              <span style={styles.infoValue}>
+                {webrtcServiceRef.current?.isInitialized ? "Initialized" : "Not Initialized"}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1259,20 +1324,19 @@ const CandidateRoom = () => {
               style={styles.remoteVideo}
               autoPlay
               playsInline
+              muted={false}
+              onLoadedMetadata={() => {
+                console.log("✅ Remote video loaded successfully");
+              }}
+              onError={(e) => {
+                console.error("❌ Remote video error:", e);
+                addNotification("Remote video error", "error");
+              }}
             />
           ) : (
             <div style={styles.noVideo}>
-              👤
-              <div
-                style={{
-                  position: "absolute",
-                  fontSize: "16px",
-                  bottom: "50px",
-                  textAlign: "center",
-                  width: "100%",
-                  color: "#9ca3af",
-                }}
-              >
+              <div style={styles.noVideoIcon}>👤</div>
+              <div style={styles.noVideoText}>
                 Waiting for interviewer to join
               </div>
             </div>
@@ -1334,11 +1398,14 @@ const CandidateRoom = () => {
                 muted
                 playsInline
                 onLoadedMetadata={() => {
-                  console.log("Local video loaded successfully");
+                  console.log("✅ Local video loaded successfully");
                 }}
                 onError={(e) => {
-                  console.error("Local video error:", e);
+                  console.error("❌ Local video error:", e);
                   addNotification("Video display error", "error");
+                }}
+                onCanPlay={() => {
+                  console.log("✅ Local video can play");
                 }}
               />
             ) : (

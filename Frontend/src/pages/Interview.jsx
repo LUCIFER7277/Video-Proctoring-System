@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import Webcam from "react-webcam";
 import axios from "axios";
 import io from "socket.io-client";
-import DetectionService from "../services/detectionService";
+import FocusDetectionService from "../services/focusDetectionService";
+import ObjectDetectionService from "../services/objectDetectionService";
 
 const Interview = () => {
   const { sessionId } = useParams();
@@ -32,9 +33,11 @@ const Interview = () => {
 
   // Refs
   const webcamRef = useRef(null);
-  const canvasRef = useRef(null);
+  const focusCanvasRef = useRef(null);
+  const objectCanvasRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const detectionServiceRef = useRef(new DetectionService());
+  const focusServiceRef = useRef(new FocusDetectionService());
+  const objectServiceRef = useRef(new ObjectDetectionService());
   const recordedChunksRef = useRef([]);
   const detectionIntervalRef = useRef(null);
   const timeIntervalRef = useRef(null);
@@ -65,7 +68,7 @@ const Interview = () => {
 
   const initializeInterview = async () => {
     try {
-      const response = await axios.get(`/api/interviews/${sessionId}`);
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/interviews/${sessionId}`);
       if (response.data.success) {
         setInterview(response.data.data.interview);
         setViolations(response.data.data.violations || []);
@@ -96,25 +99,38 @@ const Interview = () => {
       console.log("🚀 Starting AI detection initialization...");
       setError(""); // Clear any previous errors
 
-      const initialized = await detectionServiceRef.current.initialize();
-      console.log("AI initialization result:", initialized);
-
-      if (initialized) {
-        console.log("✅ AI detection successfully initialized");
-        setDetectionActive(true);
-
-        // Add violation callback
-        detectionServiceRef.current.addViolationCallback(handleViolation);
-
-        // Start detection loop
-        startDetectionLoop();
-        console.log("🔄 Detection loop started");
-      } else {
-        console.error("❌ Failed to initialize AI models");
-        setError(
-          "Failed to initialize AI models. Please refresh and try again."
-        );
+      // Wait for video element to be ready
+      if (!webcamRef.current?.video) {
+        console.log("⏳ Waiting for video element...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
+
+      if (!webcamRef.current?.video) {
+        throw new Error("Video element not available for detection");
+      }
+
+      // Initialize focus detection
+      console.log("🔍 Initializing focus detection...");
+      await focusServiceRef.current.initialize(
+        webcamRef.current.video,
+        focusCanvasRef.current
+      );
+      focusServiceRef.current.addEventListener(handleFocusEvent);
+
+      // Initialize object detection
+      console.log("📱 Initializing object detection...");
+      await objectServiceRef.current.initialize(
+        webcamRef.current.video,
+        objectCanvasRef.current
+      );
+      objectServiceRef.current.addEventListener(handleObjectEvent);
+
+      console.log("✅ AI detection successfully initialized");
+      setDetectionActive(true);
+
+      // Start detection loop
+      startDetectionLoop();
+      console.log("🔄 Detection loop started");
     } catch (error) {
       console.error("❌ Detection initialization error:", error);
       setError(`AI models failed to load: ${error.message}`);
@@ -125,9 +141,8 @@ const Interview = () => {
     console.log("🔄 Starting detection loop...");
 
     detectionIntervalRef.current = setInterval(async () => {
-      if (webcamRef.current?.video && canvasRef.current && detectionActive) {
+      if (webcamRef.current?.video && detectionActive) {
         const video = webcamRef.current.video;
-        const canvas = canvasRef.current;
 
         // Check if video is actually playing
         if (video.readyState < 2) {
@@ -136,67 +151,95 @@ const Interview = () => {
         }
 
         // Set canvas dimensions to match video
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
+        if (focusCanvasRef.current) {
+          focusCanvasRef.current.width = video.videoWidth || 640;
+          focusCanvasRef.current.height = video.videoHeight || 480;
+        }
+        if (objectCanvasRef.current) {
+          objectCanvasRef.current.width = video.videoWidth || 640;
+          objectCanvasRef.current.height = video.videoHeight || 480;
+        }
 
         console.log("📹 Processing frame...", {
           videoWidth: video.videoWidth,
           videoHeight: video.videoHeight,
-          canvasWidth: canvas.width,
-          canvasHeight: canvas.height,
         });
 
-        // Process frame
-        const result = await detectionServiceRef.current.processFrame(
-          video,
-          canvas
-        );
-        console.log("🔍 Detection result:", result);
-
-        if (result?.focus) {
-          console.log(
-            "👤 Focus status:",
-            result.focus.focusStatus,
-            "Face count:",
-            result.focus.faceCount
-          );
-          setFocusStatus(result.focus.focusStatus);
-
-          // Send focus status to interviewer
-          if (socket) {
-            socket.emit("focus-status", {
-              sessionId,
-              status: result.focus.focusStatus,
-              faceCount: result.focus.faceCount,
-              timestamp: new Date(),
-            });
-          }
-        }
-
-        if (result?.objects && result.objects.violations?.length > 0) {
-          console.log("📱 Objects detected:", result.objects.violations);
-        }
+        // The detection services will handle their own processing
+        // and trigger events through the event handlers we set up
       } else {
         console.warn("⚠️ Detection loop conditions not met:", {
           hasVideo: !!webcamRef.current?.video,
-          hasCanvas: !!canvasRef.current,
           detectionActive,
         });
       }
-    }, 2000); // Run every 2 seconds for debugging
+    }, 1000); // Run every 1 second
   };
+
+  const handleFocusEvent = useCallback(
+    (event) => {
+      console.log("🔍 Focus event:", event);
+      
+      // Update focus status
+      switch (event.type) {
+        case "looking_away":
+          setFocusStatus("looking_away");
+          break;
+        case "no_face_detected":
+          setFocusStatus("no_face");
+          break;
+        case "multiple_faces_detected":
+          setFocusStatus("multiple_faces");
+          break;
+        case "focus_restored":
+          setFocusStatus("focused");
+          break;
+        default:
+          setFocusStatus("focused");
+      }
+
+      // Handle violations
+      if (["looking_away", "no_face_detected", "multiple_faces_detected"].includes(event.type)) {
+        handleViolation({
+          type: event.type,
+          description: event.message,
+          confidence: 0.8,
+          timestamp: new Date(),
+          severity: event.type === "multiple_faces_detected" ? "high" : "medium",
+          metadata: event
+        });
+      }
+    },
+    []
+  );
+
+  const handleObjectEvent = useCallback(
+    (event) => {
+      console.log("📱 Object event:", event);
+      
+      if (event.type === "unauthorized_item_detected") {
+        handleViolation({
+          type: "unauthorized_item",
+          description: event.message,
+          confidence: event.confidence || 0.8,
+          timestamp: new Date(),
+          severity: event.priority === "high" ? "high" : "medium",
+          metadata: event
+        });
+      }
+    },
+    []
+  );
 
   const handleViolation = useCallback(
     async (violation) => {
       try {
+        console.log("🚨 Processing violation:", violation);
+        
         // Capture screenshot as evidence
-        const screenshot = detectionServiceRef.current.captureScreenshot(
-          canvasRef.current
-        );
-
-        // Convert base64 to blob
         let screenshotBlob = null;
-        if (screenshot) {
+        if (focusCanvasRef.current) {
+          const screenshot = focusCanvasRef.current.toDataURL("image/jpeg", 0.8);
           const response = await fetch(screenshot);
           screenshotBlob = await response.blob();
         }
@@ -221,13 +264,15 @@ const Interview = () => {
         }
 
         // Send to backend
-        const response = await axios.post("/api/violations", formData, {
+        const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/violations`, formData, {
           headers: {
             "Content-Type": "multipart/form-data",
           },
         });
 
         if (response.data.success) {
+          console.log("✅ Violation saved to backend");
+          
           // Update local violations list
           setViolations((prev) => [...prev, response.data.data]);
 
@@ -249,7 +294,13 @@ const Interview = () => {
           }
         }
       } catch (error) {
-        console.error("Error handling violation:", error);
+        console.error("❌ Error handling violation:", error);
+        // Still add to local state even if backend fails
+        setViolations((prev) => [...prev, {
+          ...violation,
+          id: Date.now(),
+          timestamp: violation.timestamp.toISOString()
+        }]);
       }
     },
     [sessionId, socket]
@@ -305,7 +356,7 @@ const Interview = () => {
       const formData = new FormData();
       formData.append("video", blob, `interview-${sessionId}.webm`);
 
-      await axios.post(`/api/interviews/${sessionId}/upload`, formData, {
+      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/interviews/${sessionId}/upload`, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -329,10 +380,10 @@ const Interview = () => {
       clearInterval(detectionIntervalRef.current);
 
       // End interview session
-      await axios.post(`/api/interviews/${sessionId}/end`);
+      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/interviews/${sessionId}/end`);
 
       // Generate report
-      await axios.get(`/api/interviews/${sessionId}/report`);
+      await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/interviews/${sessionId}/report`);
 
       // Navigate to report view
       navigate(`/report/${sessionId}`);
@@ -354,6 +405,10 @@ const Interview = () => {
     ) {
       mediaRecorderRef.current.stop();
     }
+    
+    // Stop detection services
+    focusServiceRef.current?.stop();
+    objectServiceRef.current?.stop();
   };
 
   const retryCamera = async () => {
@@ -699,7 +754,8 @@ const Interview = () => {
                 setCameraError(errorMessage);
               }}
             />
-            <canvas ref={canvasRef} style={styles.canvas} />
+            <canvas ref={focusCanvasRef} style={styles.canvas} />
+            <canvas ref={objectCanvasRef} style={{...styles.canvas, opacity: 0.7}} />
           </div>
           {/* Camera Status */}
           <div
