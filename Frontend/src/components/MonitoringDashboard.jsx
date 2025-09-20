@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
 const MonitoringDashboard = ({
   violations = [],
@@ -15,86 +15,134 @@ const MonitoringDashboard = ({
     violationTypes: {},
     hourlyStats: []
   });
+  const [error, setError] = useState(null);
 
-  // Update dashboard data when new violations come in
+  // Memoized time ranges for performance
+  const timeRanges = useMemo(() => ({
+    '15m': 15 * 60 * 1000,
+    '30m': 30 * 60 * 1000,
+    '1h': 60 * 60 * 1000,
+    '3h': 3 * 60 * 60 * 1000
+  }), []);
+
+  const updateDashboardData = useCallback(() => {
+    try {
+      setError(null);
+
+      // Validate violations data
+      if (!Array.isArray(violations)) {
+        throw new Error('Invalid violations data format');
+      }
+
+      const now = new Date();
+      const rangeMs = timeRanges[selectedTimeRange];
+
+      if (!rangeMs) {
+        throw new Error(`Invalid time range: ${selectedTimeRange}`);
+      }
+
+      const startTime = new Date(now.getTime() - rangeMs);
+
+      // Filter violations by time range with error handling
+      const recentViolations = violations.filter(v => {
+        try {
+          if (!v || !v.timestamp) return false;
+          const timestamp = new Date(v.timestamp);
+          return timestamp >= startTime && timestamp <= now;
+        } catch (error) {
+          console.warn('Invalid violation timestamp:', v);
+          return false;
+        }
+      });
+
+      // Create timeline data with validation
+      const timeline = recentViolations.map(v => ({
+        timestamp: new Date(v.timestamp),
+        type: v.type || 'unknown',
+        severity: v.severity || 'info',
+        description: v.description || 'No description available'
+      })).sort((a, b) => a.timestamp - b.timestamp);
+
+      // Count violation types
+      const violationTypes = {};
+      recentViolations.forEach(v => {
+        const type = v.type || 'unknown';
+        violationTypes[type] = (violationTypes[type] || 0) + 1;
+      });
+
+      // Create hourly stats (simplified)
+      const hourlyStats = [];
+      const maxHours = Math.min(rangeMs / (60 * 60 * 1000), 24);
+
+      for (let i = 0; i < maxHours; i++) {
+        const hourStart = new Date(now.getTime() - (i + 1) * 60 * 60 * 1000);
+        const hourEnd = new Date(now.getTime() - i * 60 * 60 * 1000);
+
+        const hourViolations = recentViolations.filter(v => {
+          try {
+            const vTime = new Date(v.timestamp);
+            return vTime >= hourStart && vTime < hourEnd;
+          } catch (error) {
+            return false;
+          }
+        });
+
+        hourlyStats.unshift({
+          hour: hourStart.getHours(),
+          violations: hourViolations.length,
+          focusIssues: hourViolations.filter(v =>
+            ['looking_away', 'no_face', 'multiple_faces'].includes(v.type)
+          ).length,
+          objectIssues: hourViolations.filter(v => v.type === 'unauthorized_item').length
+        });
+      }
+
+      setDashboardData({
+        timeline,
+        violationTypes,
+        hourlyStats
+      });
+
+    } catch (error) {
+      console.error('Error updating dashboard data:', error);
+      setError(error.message);
+    }
+  }, [violations, selectedTimeRange, timeRanges]);
+
+  // Update dashboard data when dependencies change
   useEffect(() => {
     updateDashboardData();
-  }, [violations, serviceStats]);
-
-  const updateDashboardData = () => {
-    const now = new Date();
-    const timeRanges = {
-      '15m': 15 * 60 * 1000,
-      '30m': 30 * 60 * 1000,
-      '1h': 60 * 60 * 1000,
-      '3h': 3 * 60 * 60 * 1000
-    };
-
-    const rangeMs = timeRanges[selectedTimeRange];
-    const startTime = new Date(now.getTime() - rangeMs);
-
-    // Filter violations by time range
-    const recentViolations = violations.filter(v =>
-      new Date(v.timestamp) >= startTime
-    );
-
-    // Create timeline data
-    const timeline = recentViolations.map(v => ({
-      timestamp: new Date(v.timestamp),
-      type: v.type,
-      severity: v.severity,
-      description: v.description
-    }));
-
-    // Count violation types
-    const violationTypes = {};
-    recentViolations.forEach(v => {
-      violationTypes[v.type] = (violationTypes[v.type] || 0) + 1;
-    });
-
-    // Create hourly stats (simplified)
-    const hourlyStats = [];
-    for (let i = 0; i < Math.min(rangeMs / (60 * 60 * 1000), 24); i++) {
-      const hourStart = new Date(now.getTime() - (i + 1) * 60 * 60 * 1000);
-      const hourEnd = new Date(now.getTime() - i * 60 * 60 * 1000);
-
-      const hourViolations = recentViolations.filter(v => {
-        const vTime = new Date(v.timestamp);
-        return vTime >= hourStart && vTime < hourEnd;
-      });
-
-      hourlyStats.unshift({
-        hour: hourStart.getHours(),
-        violations: hourViolations.length,
-        focusIssues: hourViolations.filter(v =>
-          ['looking_away', 'no_face', 'multiple_faces'].includes(v.type)
-        ).length,
-        objectIssues: hourViolations.filter(v => v.type === 'unauthorized_item').length
-      });
-    }
-
-    setDashboardData({
-      timeline,
-      violationTypes,
-      hourlyStats
-    });
-  };
+  }, [updateDashboardData]);
 
   const calculateRiskScore = useMemo(() => {
-    const weights = {
-      critical: 10,
-      warning: 5,
-      info: 1
-    };
+    try {
+      if (!Array.isArray(violations) || violations.length === 0) return 0;
 
-    let totalScore = 0;
-    violations.forEach(v => {
-      totalScore += weights[v.severity] || 1;
-    });
+      const weights = {
+        critical: 10,
+        warning: 5,
+        info: 1
+      };
 
-    // Normalize to 0-100 scale (100 being highest risk)
-    const maxPossibleScore = violations.length * 10;
-    return maxPossibleScore > 0 ? Math.min(Math.round((totalScore / maxPossibleScore) * 100), 100) : 0;
+      let totalScore = 0;
+      let validViolations = 0;
+
+      violations.forEach(v => {
+        if (v && typeof v.severity === 'string') {
+          totalScore += weights[v.severity] || 1;
+          validViolations++;
+        }
+      });
+
+      if (validViolations === 0) return 0;
+
+      // Normalize to 0-100 scale (100 being highest risk)
+      const maxPossibleScore = validViolations * 10;
+      return Math.min(Math.round((totalScore / maxPossibleScore) * 100), 100);
+    } catch (error) {
+      console.error('Error calculating risk score:', error);
+      return 0;
+    }
   }, [violations]);
 
   const getIntegrityStatus = () => {
@@ -106,52 +154,80 @@ const MonitoringDashboard = ({
     return { status: 'CRITICAL', color: '#e74c3c', description: 'Severe integrity issues' };
   };
 
-  const getFocusScore = () => {
-    const focusViolations = violations.filter(v =>
-      ['looking_away', 'no_face', 'multiple_faces'].includes(v.type)
-    ).length;
-    const totalTime = Math.max(serviceStats.totalEvents || 1, 1);
-    const focusScore = Math.max(0, 100 - (focusViolations / totalTime) * 100);
-    return Math.round(focusScore);
-  };
+  const getFocusScore = useCallback(() => {
+    try {
+      if (!Array.isArray(violations)) return 100;
 
-  const getTopViolations = () => {
-    return Object.entries(dashboardData.violationTypes)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 5)
-      .map(([type, count]) => ({ type, count }));
-  };
+      const focusViolations = violations.filter(v =>
+        v && v.type && ['looking_away', 'no_face', 'multiple_faces'].includes(v.type)
+      ).length;
 
-  const exportReport = () => {
-    if (!eventLoggingService) return;
+      const totalTime = Math.max(serviceStats?.totalEvents || 1, 1);
+      const focusScore = Math.max(0, 100 - (focusViolations / totalTime) * 100);
+      return Math.round(focusScore);
+    } catch (error) {
+      console.error('Error calculating focus score:', error);
+      return 100;
+    }
+  }, [violations, serviceStats?.totalEvents]);
 
-    const report = {
-      sessionId,
-      timestamp: new Date().toISOString(),
-      summary: {
-        totalViolations: violations.length,
-        riskScore: calculateRiskScore,
-        focusScore: getFocusScore(),
-        integrityStatus: getIntegrityStatus(),
-        duration: serviceStats.totalEvents || 0
-      },
-      violations: violations,
-      stats: serviceStats,
-      systemStatus
-    };
+  const getTopViolations = useMemo(() => {
+    try {
+      if (!dashboardData?.violationTypes || typeof dashboardData.violationTypes !== 'object') {
+        return [];
+      }
 
-    const dataStr = JSON.stringify(report, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
+      return Object.entries(dashboardData.violationTypes)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 5)
+        .map(([type, count]) => ({
+          type: type || 'unknown',
+          count: Number(count) || 0
+        }));
+    } catch (error) {
+      console.error('Error getting top violations:', error);
+      return [];
+    }
+  }, [dashboardData?.violationTypes]);
 
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `proctoring-report-${sessionId}-${Date.now()}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
+  const exportReport = useCallback(() => {
+    try {
+      const report = {
+        sessionId: sessionId || 'unknown',
+        timestamp: new Date().toISOString(),
+        summary: {
+          totalViolations: violations?.length || 0,
+          riskScore: calculateRiskScore,
+          focusScore: getFocusScore(),
+          integrityStatus: getIntegrityStatus(),
+          duration: serviceStats?.totalEvents || 0
+        },
+        violations: violations || [],
+        stats: serviceStats || {},
+        systemStatus: systemStatus || {}
+      };
+
+      const dataStr = JSON.stringify(report, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `proctoring-report-${sessionId || 'session'}-${Date.now()}.json`;
+
+      try {
+        document.body.appendChild(link);
+        link.click();
+      } finally {
+        // Ensure cleanup happens even if click fails
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Error exporting report:', error);
+      setError('Failed to export report');
+    }
+  }, [sessionId, violations, calculateRiskScore, getFocusScore, getIntegrityStatus, serviceStats, systemStatus]);
 
   const styles = {
     dashboard: {
@@ -321,7 +397,40 @@ const MonitoringDashboard = ({
 
   const integrityStatus = getIntegrityStatus();
   const focusScore = getFocusScore();
-  const topViolations = getTopViolations();
+
+  // Show error state
+  if (error) {
+    return (
+      <div style={styles.dashboard}>
+        <div style={{
+          background: '#f8d7da',
+          color: '#721c24',
+          padding: '16px',
+          borderRadius: '8px',
+          textAlign: 'center'
+        }}>
+          <strong>Dashboard Error:</strong> {error}
+          <button
+            onClick={() => {
+              setError(null);
+              updateDashboardData();
+            }}
+            style={{
+              marginLeft: '12px',
+              padding: '4px 8px',
+              background: '#721c24',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.dashboard}>
@@ -428,12 +537,12 @@ const MonitoringDashboard = ({
         {/* Top Violations */}
         <div style={styles.violationsList}>
           <h3 style={styles.cardTitle}>Top Violation Types</h3>
-          {topViolations.length === 0 ? (
+          {getTopViolations.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#27ae60', padding: '20px' }}>
               ✅ No violations detected
             </div>
           ) : (
-            topViolations.map(({ type, count }) => (
+            getTopViolations.map(({ type, count }) => (
               <div key={type} style={styles.violationItem}>
                 <div style={styles.violationType}>
                   {type.replace(/_/g, ' ')}

@@ -295,8 +295,8 @@ const PreCheck = () => {
 
       let lastUpdateTime = 0;
       const updateAudioLevel = (currentTime) => {
-        // Limit updates to 20fps to reduce CPU usage
-        if (currentTime - lastUpdateTime < 50) {
+        // Limit updates to 10fps to reduce CPU usage for better performance
+        if (currentTime - lastUpdateTime < 100) {
           animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
           return;
         }
@@ -342,14 +342,28 @@ const PreCheck = () => {
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
     if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(track => track.stop());
+      audioStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log('Audio track stopped:', track.kind);
+      });
+      audioStreamRef.current = null;
     }
 
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().then(() => {
+        console.log('Audio context closed');
+      }).catch(error => {
+        console.warn('Error closing audio context:', error);
+      });
+      audioContextRef.current = null;
+    }
+
+    if (analyserRef.current) {
+      analyserRef.current = null;
     }
 
     setAudioLevel(0);
@@ -364,6 +378,12 @@ const PreCheck = () => {
   useEffect(() => {
     return () => {
       stopAudioVisualization();
+
+      // Additional cleanup for streams and contexts
+      if (webcamRef.current?.srcObject) {
+        const stream = webcamRef.current.srcObject;
+        stream.getTracks().forEach(track => track.stop());
+      }
     };
   }, []);
 
@@ -380,24 +400,88 @@ const PreCheck = () => {
     setError('');
 
     try {
-      // Generate a simple session ID for demo purposes
-      const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      // Check if user came from Login with existing session
+      const storedUserInfo = sessionStorage.getItem('userInfo');
+      let sessionId;
 
-      // Store candidate info in sessionStorage for the interview
+      if (storedUserInfo) {
+        // User came from Login - use existing session
+        const userInfo = JSON.parse(storedUserInfo);
+        sessionId = userInfo.sessionId;
+
+        if (sessionId) {
+          // Validate the existing session
+          try {
+            const validateResponse = await axios.get(`/api/interviews/${sessionId}`);
+            if (validateResponse.data.success) {
+              console.log('Using existing session:', sessionId);
+
+              // Start the existing interview
+              const startResponse = await axios.post(`/api/interviews/${sessionId}/start`);
+              if (!startResponse.data.success) {
+                throw new Error('Failed to start existing interview session');
+              }
+            } else {
+              throw new Error('Existing session not valid');
+            }
+          } catch (validateError) {
+            console.warn('Existing session invalid, creating new one');
+            sessionId = null;
+          }
+        }
+      }
+
+      if (!sessionId) {
+        // Create new interview session if no valid existing session
+        const createResponse = await axios.post('/api/interviews', {
+          candidateName: candidateInfo.candidateName,
+          candidateEmail: candidateInfo.candidateEmail,
+          interviewerName: candidateInfo.interviewerName
+        });
+
+        if (!createResponse.data.success) {
+          throw new Error('Failed to create interview session');
+        }
+
+        sessionId = createResponse.data.sessionId;
+
+        // Start the new interview
+        const startResponse = await axios.post(`/api/interviews/${sessionId}/start`);
+        if (!startResponse.data.success) {
+          throw new Error('Failed to start interview session');
+        }
+      }
+
+      // Store/update candidate info in sessionStorage
       sessionStorage.setItem('candidateInfo', JSON.stringify({
         ...candidateInfo,
         sessionId,
         startTime: new Date().toISOString()
       }));
 
-      console.log('Starting interview with session ID:', sessionId);
+      console.log('Interview started with session ID:', sessionId);
 
-      // Navigate to interview room
-      navigate(`/candidate/${sessionId}`);
+      // Navigate to appropriate room based on role (default to candidate)
+      const userRole = storedUserInfo ? JSON.parse(storedUserInfo).role : 'candidate';
+      if (userRole === 'interviewer') {
+        navigate(`/interviewer/${sessionId}`);
+      } else {
+        navigate(`/candidate/${sessionId}`);
+      }
 
     } catch (error) {
       console.error('Error starting interview:', error);
-      setError('Failed to start interview session. Please try again.');
+
+      // Provide more specific error messages
+      if (error.message.includes('Failed to create')) {
+        setError('Unable to create interview session. Please check your connection and try again.');
+      } else if (error.message.includes('Failed to start')) {
+        setError('Unable to start interview session. Please try again.');
+      } else if (error.response?.status === 404) {
+        setError('Interview session not found. Please try again.');
+      } else {
+        setError('Failed to start interview session. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

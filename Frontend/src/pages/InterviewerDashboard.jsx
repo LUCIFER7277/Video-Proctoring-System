@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
+import axios from 'axios';
 import AlertsMonitor from '../components/AlertsMonitor';
 
 // Import detection services
@@ -21,6 +22,7 @@ const InterviewerDashboard = () => {
   const [candidateConnected, setCandidateConnected] = useState(false);
   const [socket, setSocket] = useState(null);
   const [userInfo, setUserInfo] = useState(null);
+  const [interview, setInterview] = useState(null);
   const [violations, setViolations] = useState([]);
   const [focusStatus, setFocusStatus] = useState('waiting');
   const [detectionActive, setDetectionActive] = useState(false);
@@ -32,6 +34,8 @@ const InterviewerDashboard = () => {
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [connectionQuality, setConnectionQuality] = useState('good');
   const [recordingStatus, setRecordingStatus] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   // System status
   const [systemStatus, setSystemStatus] = useState({
@@ -86,12 +90,33 @@ const InterviewerDashboard = () => {
     }
 
     setUserInfo(userData);
+    loadInterviewData();
     initializeConnection();
 
     return () => {
       cleanup();
     };
   }, [sessionId, navigate]);
+
+  const loadInterviewData = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`/api/interviews/${sessionId}`);
+
+      if (response.data.success) {
+        setInterview(response.data.data.interview);
+        setViolations(response.data.data.violations || []);
+        setError('');
+      } else {
+        setError('Interview session not found');
+      }
+    } catch (error) {
+      console.error('Error loading interview data:', error);
+      setError('Failed to load interview data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Initialize WebRTC service when socket is available
   useEffect(() => {
@@ -475,20 +500,45 @@ const InterviewerDashboard = () => {
     }
   }, []);
 
-  const handleViolation = (violation) => {
-    setViolations(prev => [...prev, violation]);
-    setServiceStats(prev => ({
-      ...prev,
-      violations: prev.violations + 1
-    }));
+  const handleViolation = async (violation) => {
+    try {
+      // Create FormData for violation with optional screenshot
+      const formData = new FormData();
+      formData.append('sessionId', sessionId);
+      formData.append('type', violation.type);
+      formData.append('description', violation.description);
+      formData.append('confidence', violation.confidence || 0.8);
+      formData.append('severity', violation.severity === 'critical' ? 'high' : violation.severity);
+      formData.append('timestamp', violation.timestamp.toISOString());
 
-    // Send violation to backend and candidate
-    if (socket) {
-      socket.emit('violation-recorded', {
-        sessionId,
-        violation,
-        timestamp: new Date()
+      // Send violation to backend
+      const response = await axios.post('/api/violations', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
+
+      if (response.data.success) {
+        // Update local state with backend response
+        setViolations(prev => [...prev, response.data.data]);
+        setServiceStats(prev => ({
+          ...prev,
+          violations: prev.violations + 1
+        }));
+
+        // Send violation to candidate via socket
+        if (socket) {
+          socket.emit('violation-recorded', {
+            sessionId,
+            violation: response.data.data,
+            timestamp: new Date()
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error recording violation:', error);
+      // Still add to local state as fallback
+      setViolations(prev => [...prev, violation]);
     }
   };
 
@@ -524,13 +574,29 @@ const InterviewerDashboard = () => {
     }
   };
 
-  const endSession = () => {
+  const endSession = async () => {
     if (window.confirm('Are you sure you want to end the interview session?')) {
-      if (socket) {
-        socket.emit('end-session', { sessionId });
+      try {
+        setLoading(true);
+
+        // End the interview session in backend
+        await axios.post(`/api/interviews/${sessionId}/end`);
+
+        // Generate report
+        await axios.get(`/api/interviews/${sessionId}/report`);
+
+        // Notify via socket
+        if (socket) {
+          socket.emit('end-session', { sessionId });
+        }
+
+        cleanup();
+        navigate(`/report/${sessionId}`);
+      } catch (error) {
+        console.error('Error ending session:', error);
+        setError('Failed to end session properly');
+        setLoading(false);
       }
-      cleanup();
-      navigate(`/report/${sessionId}`);
     }
   };
 
@@ -591,14 +657,51 @@ const InterviewerDashboard = () => {
     }
   };
 
-  const startRecording = () => {
-    setRecordingStatus(true);
-    // In a real implementation, you would start recording here
+  const startInterview = async () => {
+    try {
+      const response = await axios.post(`/api/interviews/${sessionId}/start`);
+      if (response.data.success) {
+        console.log('Interview started successfully');
+        // Update interview state if needed
+        if (interview) {
+          setInterview({...interview, status: 'in_progress'});
+        }
+      }
+    } catch (error) {
+      console.error('Error starting interview:', error);
+      setError('Failed to start interview session');
+    }
   };
 
-  const stopRecording = () => {
-    setRecordingStatus(false);
-    // In a real implementation, you would stop recording here
+  const startRecording = async () => {
+    try {
+      // Start interview session if not already started
+      if (interview && interview.status === 'scheduled') {
+        await startInterview();
+      }
+
+      setRecordingStatus(true);
+      setSystemStatus(prev => ({ ...prev, videoRecording: true }));
+
+      // In a real implementation, you would initialize MediaRecorder here
+      console.log('Recording started');
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      setError('Failed to start recording');
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      setRecordingStatus(false);
+      setSystemStatus(prev => ({ ...prev, videoRecording: false }));
+
+      // In a real implementation, you would stop MediaRecorder and upload the file
+      console.log('Recording stopped');
+    } catch (error) {
+      console.error('Error stopping recording:', error);
+      setError('Failed to stop recording');
+    }
   };
 
   // Monitor connection quality
@@ -1034,6 +1137,55 @@ const InterviewerDashboard = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          <div style={{ fontSize: '24px' }}>⏳</div>
+          <div>Loading interview dashboard...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={styles.container}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          <div style={{ fontSize: '24px', color: '#ef4444' }}>⚠️</div>
+          <div style={{ color: '#ef4444' }}>{error}</div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '12px 24px',
+              background: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer'
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -1042,6 +1194,20 @@ const InterviewerDashboard = () => {
           Interviewer Dashboard - Session {sessionId}
         </h1>
         <div style={styles.headerControls}>
+          {interview && (
+            <div style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: '500',
+              background: interview.status === 'in_progress' ? '#f0fff4' : '#fef2f2',
+              border: `1px solid ${interview.status === 'in_progress' ? '#10b981' : '#f59e0b'}`,
+              color: interview.status === 'in_progress' ? '#065f46' : '#92400e',
+              textTransform: 'capitalize'
+            }}>
+              {interview.status.replace('_', ' ')}
+            </div>
+          )}
           <div style={styles.statusBadge}>
             {candidateConnected ? 'Candidate Connected' : 'Waiting for Candidate'}
           </div>

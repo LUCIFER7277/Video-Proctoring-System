@@ -6,12 +6,41 @@ class ErrorBoundary extends React.Component {
     this.state = {
       hasError: false,
       error: null,
-      errorInfo: null
+      errorInfo: null,
+      errorId: null,
+      retryCount: 0,
+      errorCategory: 'unknown'
     };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true };
+    return {
+      hasError: true,
+      errorId: Date.now() + Math.random().toString(36).substr(2, 9),
+      errorCategory: ErrorBoundary.categorizeError(error)
+    };
+  }
+
+  static categorizeError(error) {
+    const message = error.message?.toLowerCase() || '';
+    const stack = error.stack?.toLowerCase() || '';
+
+    if (message.includes('network') || message.includes('fetch')) {
+      return 'network';
+    }
+    if (message.includes('chunk') || message.includes('loading')) {
+      return 'chunk_load';
+    }
+    if (message.includes('permission') || message.includes('mediadevices')) {
+      return 'permissions';
+    }
+    if (stack.includes('mediarecorder') || stack.includes('getusermedia')) {
+      return 'media';
+    }
+    if (message.includes('webgl') || message.includes('canvas')) {
+      return 'webgl';
+    }
+    return 'runtime';
   }
 
   componentDidCatch(error, errorInfo) {
@@ -26,17 +55,39 @@ class ErrorBoundary extends React.Component {
     this.reportError(error, errorInfo);
   }
 
-  reportError = (error, errorInfo) => {
+  reportError = async (error, errorInfo) => {
     const errorReport = {
+      id: this.state.errorId,
       message: error.message,
       stack: error.stack,
       componentStack: errorInfo.componentStack,
+      category: this.state.errorCategory,
       timestamp: new Date().toISOString(),
       userAgent: navigator.userAgent,
-      url: window.location.href
+      url: window.location.href,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight
+      },
+      userSession: this.getUserSessionInfo(),
+      retryCount: this.state.retryCount
     };
 
     console.log('Error Report:', errorReport);
+
+    // Try to send to backend first
+    try {
+      await fetch('/api/errors/report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(errorReport)
+      });
+      console.log('Error reported to backend successfully');
+    } catch (networkError) {
+      console.warn('Failed to report error to backend:', networkError);
+    }
 
     // Store in localStorage as fallback
     try {
@@ -48,6 +99,21 @@ class ErrorBoundary extends React.Component {
     }
   };
 
+  getUserSessionInfo = () => {
+    try {
+      const userInfo = sessionStorage.getItem('userInfo');
+      const candidateInfo = sessionStorage.getItem('candidateInfo');
+
+      return {
+        userInfo: userInfo ? JSON.parse(userInfo) : null,
+        candidateInfo: candidateInfo ? JSON.parse(candidateInfo) : null,
+        sessionStorage: !!sessionStorage.length
+      };
+    } catch (error) {
+      return { error: 'Failed to get session info' };
+    }
+  };
+
   handleReload = () => {
     window.location.reload();
   };
@@ -56,8 +122,87 @@ class ErrorBoundary extends React.Component {
     this.setState({
       hasError: false,
       error: null,
-      errorInfo: null
+      errorInfo: null,
+      retryCount: this.state.retryCount + 1
     });
+  };
+
+  handleRetryWithCleanup = () => {
+    // Clear application state that might be causing issues
+    try {
+      // Clear potentially corrupted session data
+      if (this.state.errorCategory === 'permissions' || this.state.errorCategory === 'media') {
+        sessionStorage.removeItem('candidateInfo');
+      }
+
+      // Clear local storage caches
+      const keysToRemove = Object.keys(localStorage).filter(key =>
+        key.includes('cache') || key.includes('temp')
+      );
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+
+    } catch (error) {
+      console.warn('Error during cleanup:', error);
+    }
+
+    this.handleReset();
+  };
+
+  getErrorMessage = () => {
+    switch (this.state.errorCategory) {
+      case 'network':
+        return 'Network connection issue detected. Please check your internet connection and try again.';
+      case 'permissions':
+        return 'Camera or microphone permission issue. Please allow access and try again.';
+      case 'media':
+        return 'Media device error. Please ensure your camera and microphone are connected and try again.';
+      case 'chunk_load':
+        return 'Failed to load application resources. This may be due to a network issue or browser cache.';
+      case 'webgl':
+        return 'Graphics rendering issue. Your browser may not support the required features.';
+      default:
+        return 'The video proctoring system encountered an unexpected error.';
+    }
+  };
+
+  getRecoverySteps = () => {
+    switch (this.state.errorCategory) {
+      case 'network':
+        return [
+          'Check your internet connection',
+          'Try refreshing the page',
+          'Disable VPN if using one',
+          'Contact your network administrator'
+        ];
+      case 'permissions':
+        return [
+          'Click the camera/microphone icon in your browser address bar',
+          'Allow access to camera and microphone',
+          'Refresh the page',
+          'Try using a different browser if issue persists'
+        ];
+      case 'media':
+        return [
+          'Ensure camera and microphone are connected',
+          'Close other applications using camera/microphone',
+          'Try unplugging and reconnecting devices',
+          'Restart your browser'
+        ];
+      case 'chunk_load':
+        return [
+          'Clear your browser cache',
+          'Disable browser extensions',
+          'Try using an incognito/private window',
+          'Use a different browser'
+        ];
+      default:
+        return [
+          'Try refreshing the page',
+          'Clear your browser cache',
+          'Disable browser extensions',
+          'Contact technical support if the issue persists'
+        ];
+    }
   };
 
   render() {
@@ -65,16 +210,36 @@ class ErrorBoundary extends React.Component {
       return (
         <div style={styles.container}>
           <div style={styles.errorBox}>
-            <div style={styles.icon}>💥</div>
-            <h1 style={styles.title}>Oops! Something went wrong</h1>
+            <div style={styles.icon}>
+              {this.state.errorCategory === 'network' ? '🌐' :
+               this.state.errorCategory === 'permissions' ? '🔒' :
+               this.state.errorCategory === 'media' ? '📹' :
+               this.state.errorCategory === 'chunk_load' ? '📦' :
+               this.state.errorCategory === 'webgl' ? '🎨' : '💥'}
+            </div>
+            <h1 style={styles.title}>
+              {this.state.errorCategory === 'network' ? 'Connection Issue' :
+               this.state.errorCategory === 'permissions' ? 'Permission Required' :
+               this.state.errorCategory === 'media' ? 'Device Error' :
+               this.state.errorCategory === 'chunk_load' ? 'Loading Error' :
+               this.state.errorCategory === 'webgl' ? 'Graphics Error' :
+               'Oops! Something went wrong'}
+            </h1>
             <p style={styles.message}>
-              The video proctoring system encountered an unexpected error.
-              This has been automatically reported.
+              {this.getErrorMessage()}
+              {this.state.retryCount > 0 && (
+                <span style={styles.retryInfo}>
+                  <br />Retry attempt: {this.state.retryCount}
+                </span>
+              )}
             </p>
 
             <div style={styles.actions}>
               <button style={styles.primaryButton} onClick={this.handleReload}>
                 🔄 Reload Page
+              </button>
+              <button style={styles.secondaryButton} onClick={this.handleRetryWithCleanup}>
+                🧹 Reset & Retry
               </button>
               <button style={styles.secondaryButton} onClick={this.handleReset}>
                 ↩️ Try Again
@@ -104,13 +269,11 @@ class ErrorBoundary extends React.Component {
             )}
 
             <div style={styles.helpText}>
-              <h3>Need Help?</h3>
+              <h3>Recovery Steps</h3>
               <ul style={styles.helpList}>
-                <li>Try refreshing the page</li>
-                <li>Check your internet connection</li>
-                <li>Clear your browser cache</li>
-                <li>Disable browser extensions</li>
-                <li>Contact technical support if the issue persists</li>
+                {this.getRecoverySteps().map((step, index) => (
+                  <li key={index}>{step}</li>
+                ))}
               </ul>
             </div>
           </div>
@@ -159,7 +322,7 @@ const styles = {
   },
   actions: {
     display: 'flex',
-    gap: '16px',
+    gap: '12px',
     justifyContent: 'center',
     marginBottom: '30px',
     flexWrap: 'wrap'
@@ -180,9 +343,9 @@ const styles = {
     background: 'linear-gradient(135deg, #95a5a6, #7f8c8d)',
     color: 'white',
     border: 'none',
-    padding: '14px 24px',
+    padding: '12px 20px',
     borderRadius: '8px',
-    fontSize: '16px',
+    fontSize: '14px',
     fontWeight: 'bold',
     cursor: 'pointer',
     transition: 'transform 0.2s ease',

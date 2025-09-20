@@ -12,6 +12,9 @@ class DetectionService {
     this.noFaceStartTime = null;
     this.violationCallbacks = [];
     this.lastObjectDetection = Date.now();
+    this.frameCount = 0;
+    this.lastCanvasWidth = 0;
+    this.lastCanvasHeight = 0;
 
     // Timing thresholds (in milliseconds)
     this.LOOKING_AWAY_THRESHOLD = 5000; // 5 seconds
@@ -75,6 +78,25 @@ class DetectionService {
   triggerViolation(violation) {
     console.log('🚨 Violation detected:', violation.type);
     this.violationCallbacks.forEach(callback => callback(violation));
+  }
+
+  // Helper method to determine violation type and severity for objects
+  getViolationTypeAndSeverity(objectClass) {
+    let type = 'device_detected';
+    let severity = 'medium';
+
+    if (objectClass === 'cell phone') {
+      type = 'phone_detected';
+      severity = 'high';
+    } else if (objectClass === 'book') {
+      type = 'book_detected';
+      severity = 'high';
+    } else if (['laptop', 'tv', 'tablet'].includes(objectClass)) {
+      type = 'device_detected';
+      severity = 'high';
+    }
+
+    return { type, severity };
   }
 
   // Real face detection and focus monitoring
@@ -231,7 +253,14 @@ class DetectionService {
       };
 
     } catch (error) {
-      console.error('Face detection error:', error);
+      if (error.name === 'NotReadableError') {
+        console.error('Camera access error during face detection:', error.message);
+      } else if (error.message && error.message.includes('tensor')) {
+        console.error('TensorFlow error during face detection:', error.message);
+        this.cleanupTensors();
+      } else {
+        console.error('Face detection error:', error);
+      }
       return null;
     }
   }
@@ -259,20 +288,8 @@ class DetectionService {
       unauthorizedItems.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
 
-        // Determine violation type and severity
-        let violationType = 'device_detected';
-        let severity = 'medium';
-
-        if (prediction.class === 'cell phone') {
-          violationType = 'phone_detected';
-          severity = 'high';
-        } else if (prediction.class === 'book') {
-          violationType = 'book_detected';
-          severity = 'high';
-        } else if (['laptop', 'tv', 'tablet'].includes(prediction.class)) {
-          violationType = 'device_detected';
-          severity = 'high';
-        }
+        // Determine violation type and severity using helper method
+        const { type: violationType, severity } = this.getViolationTypeAndSeverity(prediction.class);
 
         // Draw red bounding box
         ctx.strokeStyle = '#ff0000';
@@ -298,19 +315,7 @@ class DetectionService {
 
       // Generate violations for detected items
       const violations = unauthorizedItems.map(item => {
-        let type = 'device_detected';
-        let severity = 'medium';
-
-        if (item.class === 'cell phone') {
-          type = 'phone_detected';
-          severity = 'high';
-        } else if (item.class === 'book') {
-          type = 'book_detected';
-          severity = 'high';
-        } else if (['laptop', 'tv', 'tablet'].includes(item.class)) {
-          type = 'device_detected';
-          severity = 'high';
-        }
+        const { type, severity } = this.getViolationTypeAndSeverity(item.class);
 
         return {
           type,
@@ -335,7 +340,14 @@ class DetectionService {
       };
 
     } catch (error) {
-      console.error('Object detection error:', error);
+      if (error.name === 'NotReadableError') {
+        console.error('Camera access error during object detection:', error.message);
+      } else if (error.message && error.message.includes('tensor')) {
+        console.error('TensorFlow error during object detection:', error.message);
+        this.cleanupTensors();
+      } else {
+        console.error('Object detection error:', error);
+      }
       return null;
     }
   }
@@ -350,20 +362,42 @@ class DetectionService {
       if (predictions.length > 0) {
         const face = predictions[0];
 
-        // Check if landmarks are available
-        if (face.landmarks) {
+        // Check if landmarks are available and have sufficient data
+        if (face.landmarks && face.landmarks.length >= 12) {
+          // Validate landmark structure before processing
+          const validateLandmark = (landmark) => {
+            return landmark && Array.isArray(landmark) && landmark.length >= 2 &&
+                   typeof landmark[0] === 'number' && typeof landmark[1] === 'number';
+          };
+
           // Calculate eye aspect ratio for drowsiness detection
           const leftEye = face.landmarks.slice(0, 6);
           const rightEye = face.landmarks.slice(6, 12);
 
-          // Simple eye aspect ratio calculation
+          // Validate all required landmarks
+          const requiredLeftEyePoints = [leftEye[1], leftEye[5], leftEye[0], leftEye[3]];
+          const requiredRightEyePoints = [rightEye[1], rightEye[5], rightEye[0], rightEye[3]];
+
+          const allLandmarksValid = requiredLeftEyePoints.every(validateLandmark) &&
+                                  requiredRightEyePoints.every(validateLandmark);
+
+          if (!allLandmarksValid) {
+            return null;
+          }
+
+          // Simple eye aspect ratio calculation with safe division
           const leftEyeHeight = Math.abs(leftEye[1][1] - leftEye[5][1]);
           const leftEyeWidth = Math.abs(leftEye[0][0] - leftEye[3][0]);
-          const leftEAR = leftEyeHeight / leftEyeWidth;
+          const leftEAR = leftEyeWidth > 0 ? leftEyeHeight / leftEyeWidth : 0;
 
           const rightEyeHeight = Math.abs(rightEye[1][1] - rightEye[5][1]);
           const rightEyeWidth = Math.abs(rightEye[0][0] - rightEye[3][0]);
-          const rightEAR = rightEyeHeight / rightEyeWidth;
+          const rightEAR = rightEyeWidth > 0 ? rightEyeHeight / rightEyeWidth : 0;
+
+          // Only calculate average if both values are valid
+          if (leftEAR === 0 || rightEAR === 0) {
+            return null;
+          }
 
           const avgEAR = (leftEAR + rightEAR) / 2;
 
@@ -382,7 +416,14 @@ class DetectionService {
 
       return null;
     } catch (error) {
-      console.error('Eye closure detection error:', error);
+      if (error.name === 'NotReadableError') {
+        console.error('Camera access error during eye closure detection:', error.message);
+      } else if (error.message && error.message.includes('tensor')) {
+        console.error('TensorFlow error during eye closure detection:', error.message);
+        this.cleanupTensors();
+      } else {
+        console.error('Eye closure detection error:', error);
+      }
       return null;
     }
   }
@@ -405,28 +446,39 @@ class DetectionService {
     }
 
     try {
-      // Set canvas dimensions to match video
+      // Set canvas dimensions to match video (only when changed for performance)
       if (videoElement.videoWidth && videoElement.videoHeight) {
-        canvasElement.width = videoElement.videoWidth;
-        canvasElement.height = videoElement.videoHeight;
+        if (this.lastCanvasWidth !== videoElement.videoWidth ||
+            this.lastCanvasHeight !== videoElement.videoHeight) {
+          canvasElement.width = videoElement.videoWidth;
+          canvasElement.height = videoElement.videoHeight;
+          this.lastCanvasWidth = videoElement.videoWidth;
+          this.lastCanvasHeight = videoElement.videoHeight;
+        }
       }
 
-      // Run focus detection every frame (1 second interval)
+      // Run focus detection every frame
       const focusResult = await this.detectFocus(videoElement, canvasElement);
 
-      // Run object detection less frequently (every 2 seconds) for performance
-      const currentTime = Date.now();
+      // Run object detection less frequently (every 60 frames ≈ 2 seconds at 30fps) for performance
       let objectResult = null;
 
-      if (currentTime - this.lastObjectDetection > 2000) {
+      if (this.frameCount % 60 === 0) {
         objectResult = await this.detectObjects(videoElement, canvasElement);
-        this.lastObjectDetection = currentTime;
       }
 
       // Run eye closure detection
       const eyeClosureResult = await this.detectEyeClosure(videoElement);
       if (eyeClosureResult) {
         this.triggerViolation(eyeClosureResult);
+      }
+
+      // Increment frame count for timing
+      this.frameCount++;
+
+      // Periodic tensor cleanup (every 30 frames to prevent memory buildup)
+      if (this.frameCount % 30 === 0) {
+        this.cleanupTensors();
       }
 
       return {
@@ -437,8 +489,33 @@ class DetectionService {
       };
 
     } catch (error) {
-      console.error('Frame processing error:', error);
+      if (error.name === 'NotReadableError') {
+        console.error('Camera access error during frame processing:', error.message);
+      } else if (error.message && error.message.includes('tensor')) {
+        console.error('TensorFlow error during frame processing:', error.message);
+      } else if (error.name === 'SecurityError') {
+        console.error('Security error during frame processing (canvas access):', error.message);
+      } else {
+        console.error('Frame processing error:', error);
+      }
+      // Clean up on error to prevent memory leaks
+      this.cleanupTensors();
       return null;
+    }
+  }
+
+  // Clean up tensors to prevent memory leaks
+  cleanupTensors() {
+    try {
+      // Get current memory info
+      const memInfo = tf.memory();
+
+      // If memory usage is getting high, force garbage collection
+      if (memInfo.numTensors > 50) {
+        tf.dispose();
+      }
+    } catch (error) {
+      console.warn('Error in tensor cleanup:', error);
     }
   }
 
@@ -449,7 +526,9 @@ class DetectionService {
       models: {
         blazeface: !!this.blazefaceModel,
         cocoSsd: !!this.objectModel
-      }
+      },
+      frameCount: this.frameCount,
+      memoryInfo: tf.memory()
     };
   }
 }

@@ -23,15 +23,32 @@ class FocusDetectionService {
     this.frameSkipRate = 2; // Process every 3rd frame for better performance
     this.lastProcessTime = 0;
     this.minProcessInterval = 333; // Minimum 333ms between processing (3 FPS)
+
+    // Resource tracking for cleanup
+    this.activeRequests = new Set();
+    this.isDisposed = false;
   }
 
   async initialize(videoElement, canvasElement) {
     try {
+      // Validate video element
+      if (!videoElement) {
+        throw new Error('Video element is required for focus detection');
+      }
+
       this.canvas = canvasElement;
 
       // Only get context if canvas element exists
       if (canvasElement) {
-        this.ctx = canvasElement.getContext('2d');
+        try {
+          this.ctx = canvasElement.getContext('2d');
+          if (!this.ctx) {
+            console.warn('Failed to get 2D context from canvas - visualization will be disabled');
+          }
+        } catch (canvasError) {
+          console.warn('Canvas context error:', canvasError);
+          this.ctx = null;
+        }
       } else {
         console.warn('Canvas element not provided for focus detection - visualization will be disabled');
         this.ctx = null;
@@ -39,7 +56,15 @@ class FocusDetectionService {
 
       this.faceDetection = new FaceDetection({
         locateFile: (file) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`;
+          // Primary CDN with fallbacks
+          const cdnUrls = [
+            `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`,
+            `https://unpkg.com/@mediapipe/face_detection/${file}`,
+            `https://cdn.skypack.dev/@mediapipe/face_detection/${file}`
+          ];
+
+          // Return primary URL (MediaPipe will handle fallbacks internally)
+          return cdnUrls[0];
         }
       });
 
@@ -52,6 +77,9 @@ class FocusDetectionService {
 
       this.camera = new Camera(videoElement, {
         onFrame: async () => {
+          // Skip processing if disposed
+          if (this.isDisposed) return;
+
           // Implement frame skipping for better performance
           const now = Date.now();
           this.frameSkipCounter++;
@@ -61,7 +89,21 @@ class FocusDetectionService {
               now - this.lastProcessTime >= this.minProcessInterval) {
             this.frameSkipCounter = 0;
             this.lastProcessTime = now;
-            await this.faceDetection.send({ image: videoElement });
+
+            try {
+              // Track active request for cleanup
+              const requestId = `frame_${now}`;
+              this.activeRequests.add(requestId);
+
+              await this.faceDetection.send({ image: videoElement });
+
+              // Remove from active requests
+              this.activeRequests.delete(requestId);
+            } catch (error) {
+              console.warn('Frame processing error:', error);
+              // Clean up failed request
+              this.activeRequests.clear();
+            }
           }
         },
         width: 854, // Reduced to 854x480 for better performance (16:9 aspect ratio)
@@ -78,23 +120,41 @@ class FocusDetectionService {
   }
 
   onResults(results) {
-    if (!this.canvas || !this.ctx) return;
+    if (this.isDisposed || !this.canvas || !this.ctx) return;
 
     const currentTime = Date.now();
 
-    // Use requestAnimationFrame for smoother rendering
+    // Use requestAnimationFrame for smoother rendering with error handling
     requestAnimationFrame(() => {
-      // Clear canvas
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      try {
+        // Validate canvas context before operations
+        if (!this.canvas || !this.ctx || this.isDisposed) return;
 
-      // Draw the video frame - only if results image is available
-      if (results.image) {
-        this.ctx.drawImage(results.image, 0, 0, this.canvas.width, this.canvas.height);
-      }
+        // Check if canvas is still valid
+        if (this.canvas.width === 0 || this.canvas.height === 0) return;
 
-      // Draw face detection results inside requestAnimationFrame for smooth rendering
-      if (results.detections && results.detections.length > 0) {
-        this.drawFaceDetections(results.detections);
+        // Clear canvas
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw the video frame - only if results image is available
+        if (results.image) {
+          this.ctx.drawImage(results.image, 0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        // Draw face detection results inside requestAnimationFrame for smooth rendering
+        if (results.detections && results.detections.length > 0) {
+          this.drawFaceDetections(results.detections);
+        }
+      } catch (error) {
+        console.warn('Canvas rendering error:', error);
+        // Try to recover by clearing the context
+        try {
+          if (this.ctx) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          }
+        } catch (clearError) {
+          console.error('Failed to recover canvas context:', clearError);
+        }
       }
     }); // Close requestAnimationFrame callback
 
@@ -112,8 +172,13 @@ class FocusDetectionService {
             message: `Multiple faces detected: ${results.detections.length} faces`
           });
         }
-      } else {
+      } else if (this.multipleFacesDetected) {
+        // Only reset when we have a single face (not zero faces)
         this.multipleFacesDetected = false;
+        this.triggerEvent('single_face_restored', {
+          timestamp: new Date().toISOString(),
+          message: 'Single face detected, multiple faces issue resolved'
+        });
       }
 
       // Analyze focus for the primary face
@@ -156,8 +221,14 @@ class FocusDetectionService {
           message: 'Candidate looking away for more than 5 seconds'
         });
       }
-    } else {
+    } else if (this.isLookingAway) {
+      // Only reset when transitioning from looking away to focused
       this.isLookingAway = false;
+      this.triggerEvent('focus_restored', {
+        timestamp: new Date().toISOString(),
+        message: 'Candidate focus restored',
+        duration: currentTime - this.lastLookingAwayTime
+      });
     }
   }
 
@@ -165,15 +236,36 @@ class FocusDetectionService {
     // Simple gaze estimation based on face angle and eye position
     // This is a basic implementation for demonstration
 
-    if (landmarks.length < 6) return false;
+    if (!landmarks || landmarks.length < 4) {
+      return false;
+    }
 
-    // Get key facial points
+    // Validate landmark structure before accessing
+    const validateLandmark = (landmark) => {
+      return landmark &&
+             typeof landmark.x === 'number' &&
+             typeof landmark.y === 'number' &&
+             !isNaN(landmark.x) && !isNaN(landmark.y);
+    };
+
+    // Safely get key facial points with validation
     const rightEye = landmarks[0]; // Right eye corner
     const leftEye = landmarks[1];  // Left eye corner
     const nose = landmarks[2];     // Nose tip
     const mouth = landmarks[3];    // Mouth center
 
-    // Calculate face center
+    // Validate all required landmarks
+    if (!validateLandmark(rightEye) || !validateLandmark(leftEye) ||
+        !validateLandmark(nose) || !validateLandmark(mouth)) {
+      return false;
+    }
+
+    // Calculate face center with bounds validation
+    if (!boundingBox || typeof boundingBox.xCenter !== 'number' ||
+        typeof boundingBox.yCenter !== 'number') {
+      return false;
+    }
+
     const faceCenter = {
       x: boundingBox.xCenter,
       y: boundingBox.yCenter
@@ -189,6 +281,11 @@ class FocusDetectionService {
     const noseOffset = Math.abs(nose.x - eyeCenter.x);
     const eyeDistance = Math.abs(rightEye.x - leftEye.x);
 
+    // Prevent division by zero and handle invalid distances
+    if (eyeDistance === 0 || isNaN(eyeDistance) || isNaN(noseOffset)) {
+      return false;
+    }
+
     // If nose is offset by more than 30% of eye distance, consider looking away
     const offsetThreshold = eyeDistance * 0.3;
 
@@ -196,42 +293,69 @@ class FocusDetectionService {
   }
 
   drawFaceDetections(detections) {
-    if (!this.ctx) return;
+    if (!this.ctx || !this.canvas || this.isDisposed) return;
 
-    detections.forEach((detection, index) => {
-      const bbox = detection.boundingBox;
-      const x = bbox.xCenter - bbox.width / 2;
-      const y = bbox.yCenter - bbox.height / 2;
+    try {
+      detections.forEach((detection, index) => {
+        if (!detection || !detection.boundingBox) return;
 
-      // Draw bounding box
-      this.ctx.strokeStyle = index === 0 ? '#00ff00' : '#ff0000'; // Green for primary, red for additional
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(x * this.canvas.width, y * this.canvas.height,
-                         bbox.width * this.canvas.width, bbox.height * this.canvas.height);
+        const bbox = detection.boundingBox;
 
-      // Draw confidence score
-      this.ctx.fillStyle = index === 0 ? '#00ff00' : '#ff0000';
-      this.ctx.font = '16px Arial';
-      this.ctx.fillText(
-        `Face ${index + 1}: ${(detection.score * 100).toFixed(1)}%`,
-        x * this.canvas.width,
-        y * this.canvas.height - 10
-      );
+        // Validate bounding box data
+        if (typeof bbox.xCenter !== 'number' || typeof bbox.yCenter !== 'number' ||
+            typeof bbox.width !== 'number' || typeof bbox.height !== 'number' ||
+            isNaN(bbox.xCenter) || isNaN(bbox.yCenter) ||
+            isNaN(bbox.width) || isNaN(bbox.height)) {
+          return;
+        }
 
-      // Draw landmarks if available
-      if (detection.landmarks) {
-        this.ctx.fillStyle = '#ffff00';
-        detection.landmarks.forEach(landmark => {
-          this.ctx.beginPath();
-          this.ctx.arc(
-            landmark.x * this.canvas.width,
-            landmark.y * this.canvas.height,
-            3, 0, 2 * Math.PI
+        const x = bbox.xCenter - bbox.width / 2;
+        const y = bbox.yCenter - bbox.height / 2;
+
+        // Validate calculated coordinates
+        if (isNaN(x) || isNaN(y)) return;
+
+        // Draw bounding box with safe coordinates
+        this.ctx.strokeStyle = index === 0 ? '#00ff00' : '#ff0000'; // Green for primary, red for additional
+        this.ctx.lineWidth = 2;
+
+        const canvasX = Math.max(0, Math.min(x * this.canvas.width, this.canvas.width));
+        const canvasY = Math.max(0, Math.min(y * this.canvas.height, this.canvas.height));
+        const canvasWidth = Math.max(0, Math.min(bbox.width * this.canvas.width, this.canvas.width - canvasX));
+        const canvasHeight = Math.max(0, Math.min(bbox.height * this.canvas.height, this.canvas.height - canvasY));
+
+        this.ctx.strokeRect(canvasX, canvasY, canvasWidth, canvasHeight);
+
+        // Draw confidence score
+        if (detection.score && typeof detection.score === 'number') {
+          this.ctx.fillStyle = index === 0 ? '#00ff00' : '#ff0000';
+          this.ctx.font = '16px Arial';
+          this.ctx.fillText(
+            `Face ${index + 1}: ${(detection.score * 100).toFixed(1)}%`,
+            canvasX,
+            Math.max(20, canvasY - 10) // Ensure text is visible
           );
-          this.ctx.fill();
-        });
-      }
-    });
+        }
+
+        // Draw landmarks if available
+        if (detection.landmarks && Array.isArray(detection.landmarks)) {
+          this.ctx.fillStyle = '#ffff00';
+          detection.landmarks.forEach(landmark => {
+            if (landmark && typeof landmark.x === 'number' && typeof landmark.y === 'number' &&
+                !isNaN(landmark.x) && !isNaN(landmark.y)) {
+              const landmarkX = Math.max(0, Math.min(landmark.x * this.canvas.width, this.canvas.width));
+              const landmarkY = Math.max(0, Math.min(landmark.y * this.canvas.height, this.canvas.height));
+
+              this.ctx.beginPath();
+              this.ctx.arc(landmarkX, landmarkY, 3, 0, 2 * Math.PI);
+              this.ctx.fill();
+            }
+          });
+        }
+      });
+    } catch (error) {
+      console.warn('Error drawing face detections:', error);
+    }
   }
 
   triggerEvent(type, data) {
@@ -253,14 +377,26 @@ class FocusDetectionService {
   }
 
   addEventListener(callback) {
+    if (typeof callback !== 'function') {
+      throw new Error('Event listener must be a function');
+    }
     this.eventCallbacks.push(callback);
+
+    // Return cleanup function
+    return () => this.removeEventListener(callback);
   }
 
   removeEventListener(callback) {
     const index = this.eventCallbacks.indexOf(callback);
     if (index > -1) {
       this.eventCallbacks.splice(index, 1);
+      return true;
     }
+    return false;
+  }
+
+  removeAllEventListeners() {
+    this.eventCallbacks.length = 0;
   }
 
   updateSettings(settings) {
@@ -287,19 +423,66 @@ class FocusDetectionService {
   }
 
   stop() {
-    if (this.camera) {
-      this.camera.stop();
-    }
-    if (this.faceDetection) {
-      try {
-        this.faceDetection.close();
-      } catch (error) {
-        console.warn('MediaPipe face detection already closed:', error.message);
+    try {
+      console.log('🧹 Stopping FocusDetectionService...');
+
+      // Mark as disposed to prevent further processing
+      this.isDisposed = true;
+
+      // Clear active requests
+      this.activeRequests.clear();
+
+      // Stop camera
+      if (this.camera) {
+        try {
+          this.camera.stop();
+        } catch (error) {
+          console.warn('Error stopping camera:', error);
+        }
+        this.camera = null;
       }
-      this.faceDetection = null;
+
+      // Close MediaPipe face detection
+      if (this.faceDetection) {
+        try {
+          this.faceDetection.close();
+        } catch (error) {
+          console.warn('MediaPipe face detection already closed:', error.message);
+        }
+        this.faceDetection = null;
+      }
+
+      // Clear canvas context
+      if (this.ctx && this.canvas) {
+        try {
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        } catch (error) {
+          console.warn('Error clearing canvas:', error);
+        }
+      }
+      this.ctx = null;
+      this.canvas = null;
+
+      // Clear event listeners
+      this.removeAllEventListeners();
+
+      // Reset state
+      this.isInitialized = false;
+
+      console.log('✅ FocusDetectionService stopped successfully');
+    } catch (error) {
+      console.error('Error during FocusDetectionService cleanup:', error);
     }
-    this.isInitialized = false;
-    this.eventCallbacks = [];
+  }
+
+  // Comprehensive cleanup method
+  cleanup() {
+    this.stop();
+  }
+
+  // Destructor-like method
+  destroy() {
+    this.cleanup();
   }
 
   // Method to update canvas after component mounts
@@ -314,11 +497,14 @@ class FocusDetectionService {
   }
 
   reset() {
+    if (this.isDisposed) return;
+
     this.lastFaceDetectedTime = Date.now();
     this.lastLookingAwayTime = Date.now();
     this.isLookingAway = false;
     this.noFaceDetected = false;
     this.multipleFacesDetected = false;
+    this.activeRequests.clear();
   }
 }
 

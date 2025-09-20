@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
+import axios from 'axios';
 
 // Import Professional WebRTC Service
 import ProfessionalWebRTCService from '../services/professionalWebRTCService';
@@ -93,6 +94,9 @@ const CandidateRoom = () => {
   const [connectionQuality, setConnectionQuality] = useState('good');
   const [notifications, setNotifications] = useState([]);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
+  const [interview, setInterview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   // Refs
   const localVideoRef = useRef(null);
@@ -125,12 +129,53 @@ const CandidateRoom = () => {
     }
 
     setUserInfo(userData);
+    loadInterviewData();
     initializeConnection();
 
     return () => {
       cleanup();
     };
   }, [sessionId, navigate]);
+
+  const loadInterviewData = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`/api/interviews/${sessionId}`);
+
+      if (response.data.success) {
+        setInterview(response.data.data.interview);
+        setError('');
+
+        // Start the interview if it's scheduled
+        if (response.data.data.interview.status === 'scheduled') {
+          await startInterview();
+        }
+      } else {
+        setError('Interview session not found');
+        addNotification('Interview session not found', 'error');
+      }
+    } catch (error) {
+      console.error('Error loading interview data:', error);
+      setError('Failed to load interview data');
+      addNotification('Failed to load interview session', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startInterview = async () => {
+    try {
+      const response = await axios.post(`/api/interviews/${sessionId}/start`);
+      if (response.data.success) {
+        console.log('Interview started successfully');
+        setInterview(prev => prev ? {...prev, status: 'in_progress'} : null);
+        addNotification('Interview session started', 'success');
+      }
+    } catch (error) {
+      console.error('Error starting interview:', error);
+      addNotification('Failed to start interview session', 'warning');
+    }
+  };
 
   // Initialize WebRTC service when socket is available
   useEffect(() => {
@@ -653,11 +698,18 @@ const CandidateRoom = () => {
 
   // Auto-remove notifications after 5 seconds
   useEffect(() => {
-    notifications.forEach((notification, index) => {
-      setTimeout(() => {
-        setNotifications(prev => prev.filter((_, i) => i !== index));
+    const timeouts = [];
+
+    notifications.forEach((notification) => {
+      const timeout = setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== notification.id));
       }, 5000);
+      timeouts.push(timeout);
     });
+
+    return () => {
+      timeouts.forEach(timeout => clearTimeout(timeout));
+    };
   }, [notifications]);
 
   // Scroll chat to bottom when new message arrives
@@ -1100,6 +1152,55 @@ const CandidateRoom = () => {
     ...styles[`notification${type.charAt(0).toUpperCase() + type.slice(1)}`]
   });
 
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          <div style={{ fontSize: '24px' }}>⏳</div>
+          <div>Loading interview session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={styles.container}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          <div style={{ fontSize: '24px', color: '#ef4444' }}>⚠️</div>
+          <div style={{ color: '#ef4444', textAlign: 'center' }}>{error}</div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '12px 24px',
+              background: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer'
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       {/* Notifications */}
@@ -1154,8 +1255,26 @@ const CandidateRoom = () => {
             </div>
             <div style={styles.infoItem}>
               <span style={styles.infoLabel}>Candidate:</span>
-              <span style={styles.infoValue}>{userInfo?.name || 'Unknown'}</span>
+              <span style={styles.infoValue}>{interview?.candidateName || userInfo?.name || 'Unknown'}</span>
             </div>
+            {interview?.interviewerName && (
+              <div style={styles.infoItem}>
+                <span style={styles.infoLabel}>Interviewer:</span>
+                <span style={styles.infoValue}>{interview.interviewerName}</span>
+              </div>
+            )}
+            {interview?.status && (
+              <div style={styles.infoItem}>
+                <span style={styles.infoLabel}>Status:</span>
+                <span style={{
+                  ...styles.infoValue,
+                  color: interview.status === 'in_progress' ? '#16a34a' : '#64748b',
+                  textTransform: 'capitalize'
+                }}>
+                  {interview.status.replace('_', ' ')}
+                </span>
+              </div>
+            )}
             <div style={styles.infoItem}>
               <span style={styles.infoLabel}>Duration:</span>
               <span style={styles.infoValue}>{formatTime(elapsedTime)}</span>

@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
-const LoadingScreen = () => {
+const LoadingScreen = ({ onComplete, duration = 6000 }) => {
   const [loadingStep, setLoadingStep] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [isComplete, setIsComplete] = useState(false);
+  const intervalRef = useRef(null);
+  const timeoutRef = useRef(null);
 
   const loadingSteps = [
     { text: 'Initializing system...', icon: '🚀' },
@@ -15,24 +18,75 @@ const LoadingScreen = () => {
   ];
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (isComplete) return;
+
+    const stepInterval = duration / loadingSteps.length;
+    const progressInterval = duration / 100;
+
+    // Update loading steps
+    intervalRef.current = setInterval(() => {
       setLoadingStep(prev => {
-        if (prev < loadingSteps.length - 1) {
-          return prev + 1;
+        const next = prev + 1;
+        if (next >= loadingSteps.length) {
+          clearInterval(intervalRef.current);
+          return loadingSteps.length - 1;
         }
-        return prev;
+        return next;
       });
+    }, stepInterval);
 
+    // Update progress more smoothly
+    const progressTimer = setInterval(() => {
       setProgress(prev => {
-        if (prev < 100) {
-          return Math.min(prev + Math.random() * 15, 100);
+        const increment = 100 / (duration / 50); // Update every 50ms
+        const next = prev + increment;
+        if (next >= 100) {
+          clearInterval(progressTimer);
+          return 100;
         }
-        return prev;
+        return next;
       });
-    }, 800);
+    }, 50);
 
-    return () => clearInterval(interval);
-  }, []);
+    // Complete loading after duration
+    timeoutRef.current = setTimeout(() => {
+      setIsComplete(true);
+      if (onComplete) {
+        onComplete();
+      }
+    }, duration);
+
+    // Cleanup function
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (progressTimer) clearInterval(progressTimer);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [duration, loadingSteps.length, onComplete, isComplete]);
+
+  // Helper functions for system info
+  const getBrowserInfo = () => {
+    try {
+      const userAgent = navigator.userAgent;
+      if (userAgent.includes('Chrome')) return 'Chrome';
+      if (userAgent.includes('Firefox')) return 'Firefox';
+      if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) return 'Safari';
+      if (userAgent.includes('Edge')) return 'Edge';
+      return 'Other';
+    } catch (error) {
+      return 'Unknown';
+    }
+  };
+
+  const checkWebGLSupport = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      return gl ? '✅ Supported' : '❌ Not Supported';
+    } catch (error) {
+      return '❌ Not Supported';
+    }
+  };
 
   return (
     <div style={styles.container}>
@@ -67,12 +121,13 @@ const LoadingScreen = () => {
             <div
               style={{
                 ...styles.progressFill,
-                width: `${progress}%`
+                width: `${Math.min(progress, 100)}%`
               }}
             ></div>
           </div>
           <div style={styles.progressText}>
-            {Math.round(progress)}%
+            {Math.round(Math.min(progress, 100))}%
+            {isComplete && <span style={styles.completeText}> - Ready!</span>}
           </div>
         </div>
 
@@ -100,19 +155,17 @@ const LoadingScreen = () => {
           <div style={styles.infoItem}>
             <span>Browser: </span>
             <span style={styles.infoValue}>
-              {navigator.userAgent.includes('Chrome') ? 'Chrome' :
-               navigator.userAgent.includes('Firefox') ? 'Firefox' :
-               navigator.userAgent.includes('Safari') ? 'Safari' : 'Other'}
+              {getBrowserInfo()}
             </span>
           </div>
           <div style={styles.infoItem}>
             <span>Platform: </span>
-            <span style={styles.infoValue}>{navigator.platform}</span>
+            <span style={styles.infoValue}>{navigator.platform || 'Unknown'}</span>
           </div>
           <div style={styles.infoItem}>
             <span>WebGL: </span>
             <span style={styles.infoValue}>
-              {window.WebGLRenderingContext ? '✅ Supported' : '❌ Not Supported'}
+              {checkWebGLSupport()}
             </span>
           </div>
         </div>
@@ -272,6 +325,10 @@ const styles = {
     fontSize: '14px',
     fontWeight: 'bold',
     color: '#7f8c8d'
+  },
+  completeText: {
+    color: '#27ae60',
+    fontWeight: 'bold'
   },
   stepsList: {
     textAlign: 'left',

@@ -12,6 +12,7 @@ const Login = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const handleInputChange = (e) => {
     setFormData({
@@ -23,6 +24,7 @@ const Login = () => {
   const handleRoleSelect = (role) => {
     setSelectedRole(role);
     setError('');
+    setSuccess('');
   };
 
   const handleLogin = async (e) => {
@@ -40,6 +42,7 @@ const Login = () => {
 
     setLoading(true);
     setError('');
+    setSuccess('');
 
     try {
       let sessionId;
@@ -49,27 +52,41 @@ const Login = () => {
         console.log('Creating new interview session...');
 
         const interviewData = {
-          candidateName: 'Candidate', // Will be updated when candidate joins
-          candidateEmail: formData.email, // Use interviewer email as fallback
+          candidateName: 'TBD', // Will be updated when candidate joins
+          candidateEmail: 'candidate@example.com', // Temporary placeholder
           interviewerName: formData.name
         };
 
         const response = await axios.post(
-          `${import.meta.env.VITE_API_URL}/interviews`,
+          '/api/interviews',
           interviewData
         );
 
         if (response.data.success) {
           sessionId = response.data.sessionId;
           console.log('Created interview session:', sessionId);
+          setSuccess(`Interview session created! Session ID: ${sessionId}`);
         } else {
           throw new Error('Failed to create interview session');
         }
       } else {
-        // For candidate: Use provided session ID or generate temporary one
+        // For candidate: Validate session ID exists in backend
         sessionId = formData.sessionId;
         if (!sessionId) {
           setError('Please enter a valid session ID to join as candidate');
+          return;
+        }
+
+        // Validate session exists
+        try {
+          const validateResponse = await axios.get(`/api/interviews/${sessionId}`);
+          if (!validateResponse.data.success) {
+            throw new Error('Session not found');
+          }
+          console.log('Session validated successfully');
+        } catch (validateError) {
+          console.error('Session validation failed:', validateError);
+          setError('Invalid session ID. Please check the session ID provided by your interviewer.');
           return;
         }
       }
@@ -94,7 +111,19 @@ const Login = () => {
 
     } catch (error) {
       console.error('Login error:', error);
-      setError('Login failed. Please try again.');
+
+      // Provide more specific error messages
+      if (error.response?.status === 404) {
+        setError('Interview session not found. Please check your session ID.');
+      } else if (error.response?.status === 400) {
+        setError('Invalid request. Please check your information and try again.');
+      } else if (error.message.includes('Network Error')) {
+        setError('Connection failed. Please check your internet connection and try again.');
+      } else if (error.message.includes('Failed to create interview session')) {
+        setError('Unable to create interview session. Please try again or contact support.');
+      } else {
+        setError(`Login failed: ${error.message || 'Please try again.'}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -213,6 +242,15 @@ const Login = () => {
       color: '#cc0000',
       fontSize: '14px'
     },
+    success: {
+      background: '#e8f5e8',
+      border: '1px solid #27ae60',
+      borderRadius: '8px',
+      padding: '12px',
+      marginBottom: '20px',
+      color: '#27ae60',
+      fontSize: '14px'
+    },
     submitButton: {
       width: '100%',
       padding: '14px',
@@ -291,6 +329,12 @@ const Login = () => {
             {error && (
               <div style={styles.error}>
                 ⚠️ {error}
+              </div>
+            )}
+
+            {success && (
+              <div style={styles.success}>
+                ✅ {success}
               </div>
             )}
 

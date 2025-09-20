@@ -16,21 +16,53 @@ const AlertsMonitor = ({
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const audioRef = useRef(null);
   const containerRef = useRef(null);
+  const timeoutRefs = useRef(new Set());
 
   // Alert sound setup
   useEffect(() => {
-    // Create audio context for alert sounds
-    audioRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    // Create audio context for alert sounds with error handling
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        audioRef.current = new AudioContext();
+        console.log('Audio context created for alerts');
+      } else {
+        console.warn('Web Audio API not supported');
+      }
+    } catch (error) {
+      console.error('Failed to create audio context:', error);
+    }
+
+    // Cleanup function
+    return () => {
+      if (audioRef.current && audioRef.current.state !== 'closed') {
+        audioRef.current.close().then(() => {
+          console.log('Audio context closed');
+        }).catch(error => {
+          console.warn('Error closing audio context:', error);
+        });
+      }
+
+      // Clear all timeouts
+      timeoutRefs.current.forEach(timeoutId => {
+        clearTimeout(timeoutId);
+      });
+      timeoutRefs.current.clear();
+    };
   }, []);
 
   // Monitor violations and create alerts
   useEffect(() => {
+    if (!Array.isArray(violations) || !Array.isArray(alertHistory)) return;
+
     if (violations.length > alertHistory.length) {
       const newViolations = violations.slice(alertHistory.length);
       newViolations.forEach(violation => {
-        createAlert(violation);
+        if (violation && typeof violation === 'object') {
+          createAlert(violation);
+        }
       });
-      setAlertHistory(violations);
+      setAlertHistory([...violations]); // Create new array to prevent mutation issues
     }
   }, [violations, alertHistory.length]);
 
@@ -47,8 +79,10 @@ const AlertsMonitor = ({
     }
   }, [focusStatus]);
 
-  // Monitor system status
+  // Monitor system status with stabilized dependency
   useEffect(() => {
+    if (!systemStatus || typeof systemStatus !== 'object') return;
+
     Object.entries(systemStatus).forEach(([service, status]) => {
       if (!status) {
         createAlert({
@@ -60,7 +94,7 @@ const AlertsMonitor = ({
         });
       }
     });
-  }, [systemStatus]);
+  }, [JSON.stringify(systemStatus)]); // Use JSON.stringify to stabilize object comparison
 
   const createAlert = (alertData) => {
     const alert = {
@@ -79,19 +113,26 @@ const AlertsMonitor = ({
 
     // Auto-dismiss info alerts after 5 seconds
     if (alert.severity === 'info') {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         acknowledgeAlert(alert.id);
+        timeoutRefs.current.delete(timeoutId);
       }, 5000);
+      timeoutRefs.current.add(timeoutId);
     }
 
     // Call external alert handler
     onAlertAction('alert_created', alert);
   };
 
-  const playAlertSound = (severity) => {
-    if (!audioRef.current) return;
+  const playAlertSound = async (severity) => {
+    if (!audioRef.current || audioRef.current.state === 'closed') return;
 
     try {
+      // Resume audio context if suspended (required by some browsers)
+      if (audioRef.current.state === 'suspended') {
+        await audioRef.current.resume();
+      }
+
       const oscillator = audioRef.current.createOscillator();
       const gainNode = audioRef.current.createGain();
 
@@ -190,19 +231,33 @@ const AlertsMonitor = ({
   };
 
   const getSystemHealthScore = () => {
-    const total = Object.keys(systemStatus).length;
-    const active = Object.values(systemStatus).filter(Boolean).length;
-    return total > 0 ? Math.round((active / total) * 100) : 100;
+    try {
+      if (!systemStatus || typeof systemStatus !== 'object') return 100;
+
+      const total = Object.keys(systemStatus).length;
+      const active = Object.values(systemStatus).filter(Boolean).length;
+      return total > 0 ? Math.round((active / total) * 100) : 100;
+    } catch (error) {
+      console.error('Error calculating system health score:', error);
+      return 0;
+    }
   };
 
   const getThreatLevel = () => {
-    const criticalAlerts = (alerts || []).filter(a => a && a.severity === 'critical').length;
-    const warningAlerts = (alerts || []).filter(a => a && a.severity === 'warning').length;
+    try {
+      if (!Array.isArray(alerts)) return { level: 'NORMAL', color: '#27ae60' };
 
-    if (criticalAlerts > 2) return { level: 'HIGH', color: '#e74c3c' };
-    if (criticalAlerts > 0 || warningAlerts > 3) return { level: 'MEDIUM', color: '#f39c12' };
-    if (warningAlerts > 0) return { level: 'LOW', color: '#f1c40f' };
-    return { level: 'NORMAL', color: '#27ae60' };
+      const criticalAlerts = alerts.filter(a => a && a.severity === 'critical').length;
+      const warningAlerts = alerts.filter(a => a && a.severity === 'warning').length;
+
+      if (criticalAlerts > 2) return { level: 'HIGH', color: '#e74c3c' };
+      if (criticalAlerts > 0 || warningAlerts > 3) return { level: 'MEDIUM', color: '#f39c12' };
+      if (warningAlerts > 0) return { level: 'LOW', color: '#f1c40f' };
+      return { level: 'NORMAL', color: '#27ae60' };
+    } catch (error) {
+      console.error('Error calculating threat level:', error);
+      return { level: 'UNKNOWN', color: '#95a5a6' };
+    }
   };
 
   // Drag functionality
@@ -242,18 +297,22 @@ const AlertsMonitor = ({
 
   // Add global mouse event listeners for dragging
   useEffect(() => {
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.userSelect = 'none'; // Prevent text selection
-    }
-
-    return () => {
+    const cleanup = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       document.body.style.userSelect = '';
     };
-  }, [isDragging, dragOffset]);
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = 'none'; // Prevent text selection
+    } else {
+      cleanup();
+    }
+
+    return cleanup;
+  }, [isDragging, dragOffset.x, dragOffset.y]);
 
   const styles = {
     container: {

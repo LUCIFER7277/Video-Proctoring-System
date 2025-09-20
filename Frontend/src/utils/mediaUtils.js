@@ -275,3 +275,21 @@ export const monitorStreamHealth = (stream, callback) => {
 
   return interval;
 };
+
+// Auto-cleanup on page unload
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', cleanup);
+  window.addEventListener('unload', cleanup);
+}
+
+// Auto-cleanup on visibility change (page hidden)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      // Clean up streams when page is hidden to free resources
+      for (const stream of activeStreams) {
+        cleanupStream(stream);
+      }
+    }
+  });
+}

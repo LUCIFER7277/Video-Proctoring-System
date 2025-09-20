@@ -12,6 +12,9 @@ class EventLoggingService {
     this.maxEventsInMemory = 1000;
     this.autoSaveInterval = 10000; // Auto-save every 10 seconds
     this.autoSaveTimer = null;
+    this.isDirty = false; // Track if events have changed since last save
+    this.statisticsCache = null; // Cache for expensive statistics calculations
+    this.lastCacheUpdate = 0;
 
     // Event severity levels
     this.severityLevels = {
@@ -52,10 +55,16 @@ class EventLoggingService {
     const event = this.createEvent(eventData);
     this.events.push(event);
 
-    // Maintain memory limit
+    // Maintain memory limit efficiently
     if (this.events.length > this.maxEventsInMemory) {
-      this.events = this.events.slice(-this.maxEventsInMemory);
+      // Remove oldest events without creating new array
+      const eventsToRemove = this.events.length - this.maxEventsInMemory;
+      this.events.splice(0, eventsToRemove);
     }
+
+    // Mark as dirty for auto-save
+    this.isDirty = true;
+    this.invalidateCache();
 
     // Trigger callbacks
     this.eventCallbacks.forEach(callback => {
@@ -121,7 +130,8 @@ class EventLoggingService {
   }
 
   logObjectDetectionEvent(eventData) {
-    const severity = this.getObjectDetectionSeverity(eventData.priority);
+    // Use severity if provided, otherwise derive from priority
+    const severity = eventData.severity || this.getObjectDetectionSeverity(eventData.priority || eventData.severity);
     return this.logEvent({
       ...eventData,
       source: 'object_detection',
@@ -152,6 +162,12 @@ class EventLoggingService {
     });
   }
 
+  // Cache management
+  invalidateCache() {
+    this.statisticsCache = null;
+    this.lastCacheUpdate = 0;
+  }
+
   getObjectDetectionSeverity(priority) {
     switch (priority) {
       case 'high':
@@ -165,35 +181,30 @@ class EventLoggingService {
     }
   }
 
-  // Query and filter methods
+  // Query and filter methods (optimized)
   getEvents(filters = {}) {
-    let filteredEvents = [...this.events];
-
-    if (filters.type) {
-      filteredEvents = filteredEvents.filter(event => event.type === filters.type);
+    // Check if we need to apply any filters
+    const hasFilters = Object.keys(filters).length > 0;
+    if (!hasFilters) {
+      return [...this.events]; // Return copy of all events
     }
 
-    if (filters.severity) {
-      filteredEvents = filteredEvents.filter(event => event.severity === filters.severity);
+    // Use efficient filtering without intermediate arrays
+    const result = this.events.filter(event => {
+      if (filters.type && event.type !== filters.type) return false;
+      if (filters.severity && event.severity !== filters.severity) return false;
+      if (filters.source && event.source !== filters.source) return false;
+      if (filters.startTime && event.timestamp < filters.startTime) return false;
+      if (filters.endTime && event.timestamp > filters.endTime) return false;
+      return true;
+    });
+
+    // Apply limit correctly (first N events, not last N)
+    if (filters.limit && filters.limit > 0) {
+      return result.slice(0, filters.limit);
     }
 
-    if (filters.source) {
-      filteredEvents = filteredEvents.filter(event => event.source === filters.source);
-    }
-
-    if (filters.startTime) {
-      filteredEvents = filteredEvents.filter(event => event.timestamp >= filters.startTime);
-    }
-
-    if (filters.endTime) {
-      filteredEvents = filteredEvents.filter(event => event.timestamp <= filters.endTime);
-    }
-
-    if (filters.limit) {
-      filteredEvents = filteredEvents.slice(-filters.limit);
-    }
-
-    return filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    return result;
   }
 
   getViolations() {
@@ -213,8 +224,15 @@ class EventLoggingService {
     return this.getEvents({ startTime });
   }
 
-  // Statistics and reporting
+  // Statistics and reporting (with caching)
   getEventSummary() {
+    const now = Date.now();
+
+    // Return cached version if recent and still valid
+    if (this.statisticsCache && (now - this.lastCacheUpdate) < 5000) {
+      return { ...this.statisticsCache };
+    }
+
     const summary = {
       total: this.events.length,
       byType: {},
@@ -237,7 +255,11 @@ class EventLoggingService {
       summary.bySource[event.source] = (summary.bySource[event.source] || 0) + 1;
     });
 
-    return summary;
+    // Cache the result
+    this.statisticsCache = summary;
+    this.lastCacheUpdate = now;
+
+    return { ...summary };
   }
 
   getViolationReport() {
@@ -285,10 +307,54 @@ class EventLoggingService {
         savedAt: new Date().toISOString()
       };
 
-      localStorage.setItem(this.storageKey, JSON.stringify(data));
+      const serializedData = JSON.stringify(data);
+      localStorage.setItem(this.storageKey, serializedData);
+      this.isDirty = false;
       console.log('Events saved to local storage');
+      return true;
     } catch (error) {
-      console.error('Failed to save events to local storage:', error);
+      if (error.name === 'QuotaExceededError') {
+        console.warn('LocalStorage quota exceeded, attempting to free space...');
+        // Try to save a smaller subset of events
+        return this.saveReducedEvents();
+      } else if (error.name === 'SecurityError') {
+        console.error('LocalStorage access denied (private browsing?):', error.message);
+      } else {
+        console.error('Failed to save events to local storage:', error);
+      }
+      return false;
+    }
+  }
+
+  saveReducedEvents() {
+    try {
+      // Save only critical events and recent events
+      const criticalEvents = this.events.filter(event =>
+        event.severity === 'violation' || event.severity === 'critical'
+      );
+      const recentEvents = this.events.slice(-50); // Last 50 events
+
+      // Combine and deduplicate
+      const eventsToSave = [...new Map([...criticalEvents, ...recentEvents].map(e => [e.id, e])).values()];
+
+      const reducedData = {
+        sessionId: this.sessionId,
+        candidateId: this.candidateId,
+        interviewId: this.interviewId,
+        startTime: this.startTime,
+        events: eventsToSave,
+        savedAt: new Date().toISOString(),
+        reduced: true,
+        originalCount: this.events.length
+      };
+
+      localStorage.setItem(this.storageKey, JSON.stringify(reducedData));
+      this.isDirty = false;
+      console.log(`Saved reduced event set: ${eventsToSave.length} of ${this.events.length} events`);
+      return true;
+    } catch (error) {
+      console.error('Failed to save even reduced events:', error);
+      return false;
     }
   }
 
@@ -339,12 +405,12 @@ class EventLoggingService {
 
     events.forEach(event => {
       const row = [
-        event.timestamp,
-        event.type,
-        event.severity,
-        `"${event.message.replace(/"/g, '""')}"`,
-        event.source,
-        event.duration || ''
+        this.escapeCSVField(event.timestamp),
+        this.escapeCSVField(event.type),
+        this.escapeCSVField(event.severity),
+        this.escapeCSVField(event.message),
+        this.escapeCSVField(event.source),
+        this.escapeCSVField(event.duration || '')
       ];
       csvRows.push(row.join(','));
     });
@@ -352,14 +418,36 @@ class EventLoggingService {
     return csvRows.join('\n');
   }
 
-  // Auto-save functionality
+  escapeCSVField(field) {
+    if (field == null) return '';
+
+    const stringField = String(field);
+
+    // Remove potential CSV injection characters
+    const sanitized = stringField
+      .replace(/^[=@+\-]/, '') // Remove formula injection chars at start
+      .replace(/[\r\n]/g, ' ') // Replace line breaks with spaces
+      .trim();
+
+    // Escape quotes and wrap in quotes if needed
+    if (sanitized.includes(',') || sanitized.includes('"') || sanitized.includes('\n')) {
+      return `"${sanitized.replace(/"/g, '""')}"`;
+    }
+
+    return sanitized;
+  }
+
+  // Auto-save functionality (with change detection)
   startAutoSave() {
     if (this.autoSaveTimer) {
       clearInterval(this.autoSaveTimer);
     }
 
     this.autoSaveTimer = setInterval(() => {
-      this.saveToLocalStorage();
+      // Only save if there are changes
+      if (this.isDirty) {
+        this.saveToLocalStorage();
+      }
     }, this.autoSaveInterval);
   }
 
@@ -370,16 +458,28 @@ class EventLoggingService {
     }
   }
 
-  // Event listeners
+  // Event listeners (with proper cleanup)
   addEventListener(callback) {
+    if (typeof callback !== 'function') {
+      throw new Error('Event listener must be a function');
+    }
     this.eventCallbacks.push(callback);
+
+    // Return cleanup function
+    return () => this.removeEventListener(callback);
   }
 
   removeEventListener(callback) {
     const index = this.eventCallbacks.indexOf(callback);
     if (index > -1) {
       this.eventCallbacks.splice(index, 1);
+      return true;
     }
+    return false;
+  }
+
+  removeAllEventListeners() {
+    this.eventCallbacks.length = 0;
   }
 
   // Session management
@@ -400,8 +500,46 @@ class EventLoggingService {
   }
 
   clearEvents() {
-    this.events = [];
-    localStorage.removeItem(this.storageKey);
+    this.events.length = 0; // More memory efficient than creating new array
+    this.invalidateCache();
+    this.isDirty = true;
+    try {
+      localStorage.removeItem(this.storageKey);
+    } catch (error) {
+      console.warn('Failed to clear localStorage:', error);
+    }
+  }
+
+  // Comprehensive cleanup method
+  cleanup() {
+    try {
+      console.log('🧹 Cleaning up EventLoggingService...');
+
+      // Stop auto-save
+      this.stopAutoSave();
+
+      // Save final state
+      this.saveToLocalStorage();
+
+      // Clear event listeners
+      this.removeAllEventListeners();
+
+      // Clear caches
+      this.invalidateCache();
+
+      // Clear events if needed (optional, keeps data by default)
+      // this.clearEvents();
+
+      console.log('✅ EventLoggingService cleaned up successfully');
+    } catch (error) {
+      console.error('Error during EventLoggingService cleanup:', error);
+    }
+  }
+
+  // Destructor-like method
+  destroy() {
+    this.cleanup();
+    this.clearEvents();
   }
 
   getStatus() {
@@ -412,7 +550,14 @@ class EventLoggingService {
       startTime: this.startTime,
       eventCount: this.events.length,
       violationCount: this.getViolations().length,
-      autoSaveEnabled: this.autoSaveTimer !== null
+      autoSaveEnabled: this.autoSaveTimer !== null,
+      isDirty: this.isDirty,
+      cacheLastUpdate: this.lastCacheUpdate,
+      listenerCount: this.eventCallbacks.length,
+      memoryUsage: {
+        eventsInMemory: this.events.length,
+        maxEventsInMemory: this.maxEventsInMemory
+      }
     };
   }
 }

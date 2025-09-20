@@ -5,57 +5,104 @@ class ErrorHandler {
     this.maxHistorySize = 100;
     this.retryAttempts = new Map();
     this.maxRetries = 3;
+    this.isDisposed = false;
+    this.activeTimeouts = new Set();
+    this.eventListeners = new Map();
+    this.lastErrorTime = new Map();
+    this.errorRateLimit = 5000; // 5 seconds
+    this.maxErrorsPerMinute = 10;
+    this.errorCounts = new Map();
 
     // Set up global error handlers
     this.setupGlobalHandlers();
   }
 
   setupGlobalHandlers() {
+    if (this.isDisposed) return;
+
     // Handle unhandled promise rejections
-    window.addEventListener('unhandledrejection', (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
-      this.handleError(new Error(`Unhandled promise rejection: ${event.reason}`), {
+    const unhandledRejectionHandler = (event) => {
+      if (this.isDisposed) return;
+      const sanitizedReason = this.sanitizeErrorData(event.reason);
+      console.error('Unhandled promise rejection:', sanitizedReason);
+      this.handleError(new Error(`Unhandled promise rejection: ${sanitizedReason}`), {
         type: 'unhandled_promise',
         source: 'global'
       });
-    });
+    };
 
     // Handle JavaScript errors
-    window.addEventListener('error', (event) => {
-      console.error('JavaScript error:', event.error);
+    const jsErrorHandler = (event) => {
+      if (this.isDisposed) return;
+      const sanitizedError = this.sanitizeErrorData(event.error);
+      console.error('JavaScript error:', sanitizedError);
       this.handleError(event.error || new Error(event.message), {
         type: 'javascript_error',
         source: 'global',
-        filename: event.filename,
+        filename: this.sanitizeString(event.filename),
         lineno: event.lineno,
         colno: event.colno
       });
-    });
+    };
 
-    // Handle resource loading errors
-    window.addEventListener('error', (event) => {
-      if (event.target !== window) {
-        console.error('Resource loading error:', event.target);
-        this.handleError(new Error(`Failed to load resource: ${event.target.src || event.target.href}`), {
-          type: 'resource_error',
-          source: 'global',
-          element: event.target.tagName
-        });
-      }
-    }, true);
+    // Handle resource loading errors (using capture phase to avoid duplicate listeners)
+    const resourceErrorHandler = (event) => {
+      if (this.isDisposed || event.target === window) return;
+      const sanitizedSrc = this.sanitizeString(event.target.src || event.target.href);
+      console.error('Resource loading error:', event.target);
+      this.handleError(new Error(`Failed to load resource: ${sanitizedSrc}`), {
+        type: 'resource_error',
+        source: 'global',
+        element: event.target.tagName
+      });
+    };
+
+    // Add event listeners and track them for cleanup
+    window.addEventListener('unhandledrejection', unhandledRejectionHandler);
+    window.addEventListener('error', jsErrorHandler);
+    window.addEventListener('error', resourceErrorHandler, true);
+
+    // Store references for cleanup
+    this.eventListeners.set('unhandledrejection', unhandledRejectionHandler);
+    this.eventListeners.set('error', jsErrorHandler);
+    this.eventListeners.set('resourceerror', resourceErrorHandler);
   }
 
   handleError(error, context = {}) {
+    if (this.isDisposed) return null;
+
+    // Rate limiting - prevent spam
+    const errorKey = `${error.name}:${error.message}`;
+    const now = Date.now();
+    const lastTime = this.lastErrorTime.get(errorKey) || 0;
+
+    if (now - lastTime < this.errorRateLimit) {
+      return null; // Skip if too recent
+    }
+
+    // Check error frequency
+    const minuteAgo = now - 60000;
+    this.errorCounts.set(errorKey, (this.errorCounts.get(errorKey) || []).filter(time => time > minuteAgo));
+    const recentErrors = this.errorCounts.get(errorKey);
+
+    if (recentErrors.length >= this.maxErrorsPerMinute) {
+      return null; // Rate limited
+    }
+
+    recentErrors.push(now);
+    this.errorCounts.set(errorKey, recentErrors);
+    this.lastErrorTime.set(errorKey, now);
+
     const errorInfo = {
       id: Date.now() + Math.random(),
       timestamp: new Date().toISOString(),
-      message: error.message || 'Unknown error',
-      stack: error.stack,
-      name: error.name || 'Error',
-      context,
-      userAgent: navigator.userAgent,
-      url: window.location.href,
-      retry_count: this.retryAttempts.get(error.message) || 0
+      message: this.sanitizeString(error.message) || 'Unknown error',
+      stack: this.sanitizeStack(error.stack),
+      name: this.sanitizeString(error.name) || 'Error',
+      context: this.sanitizeErrorData(context),
+      userAgent: this.sanitizeString(navigator.userAgent),
+      url: this.sanitizeString(window.location.href),
+      retry_count: this.retryAttempts.get(this.sanitizeString(error.message)) || 0
     };
 
     // Add to history
@@ -118,14 +165,17 @@ class ErrorHandler {
     });
   }
 
-  // Retry mechanism
-  async retryOperation(operation, operationName, maxRetries = null) {
+  // Retry mechanism with timeout handling
+  async retryOperation(operation, operationName, maxRetries = null, timeout = 30000) {
+    if (this.isDisposed) throw new Error('ErrorHandler is disposed');
+
     const retries = maxRetries || this.maxRetries;
     let lastError;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const result = await operation();
+        // Add timeout to operation
+        const result = await this.withTimeout(operation(), timeout);
         // Reset retry count on success
         this.retryAttempts.delete(operationName);
         return result;
@@ -138,13 +188,16 @@ class ErrorHandler {
           operationName,
           attempt,
           maxRetries: retries,
-          source: 'retry_mechanism'
+          source: 'retry_mechanism',
+          timeout
         });
 
         if (attempt < retries) {
-          // Exponential backoff
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          // Exponential backoff with jitter
+          const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          const jitter = Math.random() * 1000;
+          const delay = baseDelay + jitter;
+          await this.delay(delay);
         }
       }
     }
@@ -183,23 +236,36 @@ class ErrorHandler {
       }
     });
 
-    // Check browser version
-    const userAgent = navigator.userAgent;
-    if (userAgent.includes('Chrome/')) {
-      const version = parseInt(userAgent.match(/Chrome\/(\d+)/)[1]);
-      if (version < 80) {
-        issues.push('Chrome version too old (minimum: 80)');
+    // Check browser version with safe parsing
+    try {
+      const userAgent = navigator.userAgent;
+      if (userAgent.includes('Chrome/')) {
+        const match = userAgent.match(/Chrome\/(\d+)/);
+        if (match && match[1]) {
+          const version = parseInt(match[1], 10);
+          if (!isNaN(version) && version < 80) {
+            issues.push('Chrome version too old (minimum: 80)');
+          }
+        }
+      } else if (userAgent.includes('Firefox/')) {
+        const match = userAgent.match(/Firefox\/(\d+)/);
+        if (match && match[1]) {
+          const version = parseInt(match[1], 10);
+          if (!isNaN(version) && version < 75) {
+            issues.push('Firefox version too old (minimum: 75)');
+          }
+        }
+      } else if (userAgent.includes('Safari/')) {
+        const match = userAgent.match(/Version\/(\d+)/);
+        if (match && match[1]) {
+          const version = parseInt(match[1], 10);
+          if (!isNaN(version) && version < 13) {
+            issues.push('Safari version too old (minimum: 13)');
+          }
+        }
       }
-    } else if (userAgent.includes('Firefox/')) {
-      const version = parseInt(userAgent.match(/Firefox\/(\d+)/)[1]);
-      if (version < 75) {
-        issues.push('Firefox version too old (minimum: 75)');
-      }
-    } else if (userAgent.includes('Safari/')) {
-      const version = parseInt(userAgent.match(/Version\/(\d+)/)?.[1] || '0');
-      if (version < 13) {
-        issues.push('Safari version too old (minimum: 13)');
-      }
+    } catch (parseError) {
+      issues.push('Unable to parse browser version');
     }
 
     if (issues.length > 0) {
@@ -216,19 +282,21 @@ class ErrorHandler {
     return { compatible: true, issues: [] };
   }
 
-  // Performance monitoring
+  // Performance monitoring with safe memory access
   monitorPerformance(operationName, operation) {
     return async (...args) => {
+      if (this.isDisposed) throw new Error('ErrorHandler is disposed');
+
       const startTime = performance.now();
-      const startMemory = performance.memory ? performance.memory.usedJSHeapSize : 0;
+      const startMemory = this.getMemoryUsage();
 
       try {
         const result = await operation(...args);
 
         const endTime = performance.now();
-        const endMemory = performance.memory ? performance.memory.usedJSHeapSize : 0;
+        const endMemory = this.getMemoryUsage();
         const duration = endTime - startTime;
-        const memoryDelta = endMemory - startMemory;
+        const memoryDelta = endMemory && startMemory ? endMemory - startMemory : 0;
 
         // Log performance metrics
         console.log(`Performance: ${operationName}`, {
@@ -317,54 +385,51 @@ class ErrorHandler {
     return suggestions;
   }
 
-  // Error reporting
+  // Secure error reporting with data filtering
   async reportError(errorInfo, userFeedback = '') {
+    if (this.isDisposed) return { success: false, error: 'Handler disposed' };
+
     try {
+      // Sanitize all data before reporting
       const report = {
-        ...errorInfo,
-        userFeedback,
+        ...this.sanitizeErrorData(errorInfo),
+        userFeedback: this.sanitizeString(userFeedback),
         browserInfo: {
-          userAgent: navigator.userAgent,
-          platform: navigator.platform,
-          language: navigator.language,
-          cookieEnabled: navigator.cookieEnabled,
-          onLine: navigator.onLine
+          userAgent: this.sanitizeString(navigator.userAgent),
+          platform: this.sanitizeString(navigator.platform),
+          language: this.sanitizeString(navigator.language),
+          cookieEnabled: Boolean(navigator.cookieEnabled),
+          onLine: Boolean(navigator.onLine)
         },
         pageInfo: {
-          url: window.location.href,
-          referrer: document.referrer,
-          title: document.title
+          url: this.sanitizeString(window.location.href),
+          referrer: this.sanitizeString(document.referrer),
+          title: this.sanitizeString(document.title)
         },
         systemInfo: {
           screen: {
-            width: screen.width,
-            height: screen.height,
-            colorDepth: screen.colorDepth
+            width: screen.width || 0,
+            height: screen.height || 0,
+            colorDepth: screen.colorDepth || 0
           },
           viewport: {
-            width: window.innerWidth,
-            height: window.innerHeight
+            width: window.innerWidth || 0,
+            height: window.innerHeight || 0
           },
-          memory: performance.memory ? {
-            usedJSHeapSize: performance.memory.usedJSHeapSize,
-            totalJSHeapSize: performance.memory.totalJSHeapSize,
-            jsHeapSizeLimit: performance.memory.jsHeapSizeLimit
-          } : null
+          memory: this.getMemoryInfo()
         }
       };
 
       // In a real application, send this to your error reporting service
       console.log('Error report generated:', report);
 
-      // For now, just save to localStorage as a fallback
-      const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
-      reports.unshift(report);
-      localStorage.setItem('error_reports', JSON.stringify(reports.slice(0, 50)));
+      // Safe localStorage handling with quota management
+      await this.saveErrorReport(report);
 
       return { success: true, reportId: errorInfo.id };
     } catch (error) {
       console.error('Failed to report error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: this.sanitizeString(error.message) };
     }
   }
 
@@ -413,6 +478,181 @@ class ErrorHandler {
       bySource,
       mostCommon: Object.entries(byType).sort(([,a], [,b]) => b - a)[0]
     };
+  }
+
+  // Security helper methods
+  sanitizeString(str) {
+    if (typeof str !== 'string') return String(str || '');
+
+    // Remove potential XSS and sensitive data patterns
+    return str
+      .replace(/(<script[^>]*>.*?<\/script>)/gi, '[SCRIPT_REMOVED]')
+      .replace(/javascript:/gi, '[JS_REMOVED]')
+      .replace(/on\w+\s*=/gi, '[EVENT_REMOVED]')
+      .replace(/password|token|key|secret|auth/gi, '[SENSITIVE_DATA]')
+      .substring(0, 1000); // Limit length
+  }
+
+  sanitizeStack(stack) {
+    if (!stack) return null;
+
+    // Remove sensitive file paths and keep only relative paths
+    return this.sanitizeString(stack)
+      .replace(/file:\/\/\/[^:\s]+/g, '[FILE_PATH]')
+      .replace(/https?:\/\/[^:\s]+/g, '[URL]')
+      .split('\n')
+      .slice(0, 10) // Limit stack depth
+      .join('\n');
+  }
+
+  sanitizeErrorData(data) {
+    if (!data || typeof data !== 'object') return data;
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'string') {
+        sanitized[key] = this.sanitizeString(value);
+      } else if (typeof value === 'object' && value !== null) {
+        sanitized[key] = this.sanitizeErrorData(value);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    return sanitized;
+  }
+
+  // Memory helper methods
+  getMemoryUsage() {
+    try {
+      return performance.memory?.usedJSHeapSize || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  getMemoryInfo() {
+    try {
+      if (!performance.memory) return null;
+
+      return {
+        usedJSHeapSize: performance.memory.usedJSHeapSize || 0,
+        totalJSHeapSize: performance.memory.totalJSHeapSize || 0,
+        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit || 0
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // Storage helper methods with quota management
+  async saveErrorReport(report) {
+    const storageKey = 'error_reports';
+
+    try {
+      // Try localStorage first
+      const reports = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      reports.unshift(report);
+      const trimmedReports = reports.slice(0, 50);
+
+      const reportData = JSON.stringify(trimmedReports);
+
+      // Check if we're approaching localStorage quota
+      if (reportData.length > 4.5 * 1024 * 1024) { // 4.5MB threshold
+        // Keep only the most recent 25 reports
+        const reducedReports = trimmedReports.slice(0, 25);
+        localStorage.setItem(storageKey, JSON.stringify(reducedReports));
+      } else {
+        localStorage.setItem(storageKey, reportData);
+      }
+    } catch (storageError) {
+      if (storageError.name === 'QuotaExceededError') {
+        // Try to recover by clearing old data
+        try {
+          localStorage.removeItem(storageKey);
+          localStorage.setItem(storageKey, JSON.stringify([report]));
+        } catch (fallbackError) {
+          // If localStorage is completely unavailable, use sessionStorage
+          try {
+            sessionStorage.setItem(`${storageKey}_fallback`, JSON.stringify([report]));
+          } catch (sessionError) {
+            console.warn('Unable to store error report:', sessionError);
+          }
+        }
+      }
+    }
+  }
+
+  // Utility methods for async operations
+  async withTimeout(promise, timeout) {
+    const timeoutId = setTimeout(() => {
+      throw new Error(`Operation timed out after ${timeout}ms`);
+    }, timeout);
+
+    this.activeTimeouts.add(timeoutId);
+
+    try {
+      const result = await promise;
+      clearTimeout(timeoutId);
+      this.activeTimeouts.delete(timeoutId);
+      return result;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      this.activeTimeouts.delete(timeoutId);
+      throw error;
+    }
+  }
+
+  async delay(ms) {
+    return new Promise(resolve => {
+      const timeoutId = setTimeout(resolve, ms);
+      this.activeTimeouts.add(timeoutId);
+      setTimeout(() => this.activeTimeouts.delete(timeoutId), ms);
+    });
+  }
+
+  // Cleanup and disposal methods
+  dispose() {
+    if (this.isDisposed) return;
+
+    console.log('🧹 Disposing ErrorHandler...');
+    this.isDisposed = true;
+
+    // Clear all active timeouts
+    for (const timeoutId of this.activeTimeouts) {
+      clearTimeout(timeoutId);
+    }
+    this.activeTimeouts.clear();
+
+    // Remove global event listeners
+    for (const [eventType, handler] of this.eventListeners) {
+      try {
+        if (eventType === 'resourceerror') {
+          window.removeEventListener('error', handler, true);
+        } else {
+          window.removeEventListener(eventType, handler);
+        }
+      } catch (error) {
+        console.warn(`Failed to remove ${eventType} listener:`, error);
+      }
+    }
+    this.eventListeners.clear();
+
+    // Clear all data structures
+    this.errorCallbacks.length = 0;
+    this.errorHistory.length = 0;
+    this.retryAttempts.clear();
+    this.lastErrorTime.clear();
+    this.errorCounts.clear();
+
+    console.log('✅ ErrorHandler disposed successfully');
+  }
+
+  cleanup() {
+    this.dispose();
+  }
+
+  destroy() {
+    this.dispose();
   }
 }
 

@@ -1,41 +1,219 @@
 /**
  * Professional Connection Test Utility
- * Comprehensive testing for WebRTC connectivity
+ * Comprehensive testing for WebRTC connectivity with proper resource management
  */
 
 import ProfessionalWebRTCService from '../services/professionalWebRTCService';
 
 /**
- * Test WebRTC connectivity with comprehensive reporting
+ * Connection Test Manager Class for proper resource tracking and cleanup
  */
-export const testWebRTCConnectivity = async () => {
+class ConnectionTestManager {
+  constructor() {
+    this.activePeerConnections = new Set();
+    this.activeTimeouts = new Set();
+    this.activeStreams = new Set();
+    this.isDisposed = false;
+    this.abortController = new AbortController();
+  }
+
+  /**
+   * Create a tracked PeerConnection that will be properly cleaned up
+   */
+  createTrackedPeerConnection(config) {
+    if (this.isDisposed) {
+      throw new Error('Test manager has been disposed');
+    }
+
+    const pc = new RTCPeerConnection(config);
+    this.activePeerConnections.add(pc);
+
+    // Auto-cleanup on state change to closed
+    pc.addEventListener('connectionstatechange', () => {
+      if (pc.connectionState === 'closed') {
+        this.activePeerConnections.delete(pc);
+      }
+    });
+
+    return pc;
+  }
+
+  /**
+   * Create a tracked timeout that will be properly cleaned up
+   */
+  createTrackedTimeout(callback, delay) {
+    if (this.isDisposed) {
+      return null;
+    }
+
+    const timeoutId = setTimeout(() => {
+      this.activeTimeouts.delete(timeoutId);
+      if (!this.isDisposed) {
+        callback();
+      }
+    }, delay);
+
+    this.activeTimeouts.add(timeoutId);
+    return timeoutId;
+  }
+
+  /**
+   * Clear a tracked timeout
+   */
+  clearTrackedTimeout(timeoutId) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      this.activeTimeouts.delete(timeoutId);
+    }
+  }
+
+  /**
+   * Track a media stream for cleanup
+   */
+  trackStream(stream) {
+    if (!this.isDisposed && stream) {
+      this.activeStreams.add(stream);
+    }
+    return stream;
+  }
+
+  /**
+   * Check if test should be aborted
+   */
+  isAborted() {
+    return this.abortController.signal.aborted || this.isDisposed;
+  }
+
+  /**
+   * Abort all running tests
+   */
+  abort() {
+    this.abortController.abort();
+    this.cleanup();
+  }
+
+  /**
+   * Clean up all tracked resources
+   */
+  cleanup() {
+    this.isDisposed = true;
+
+    // Close all peer connections
+    this.activePeerConnections.forEach(pc => {
+      try {
+        if (pc.connectionState !== 'closed') {
+          pc.close();
+        }
+      } catch (error) {
+        console.warn('Error closing peer connection:', error);
+      }
+    });
+    this.activePeerConnections.clear();
+
+    // Clear all timeouts
+    this.activeTimeouts.forEach(timeoutId => {
+      try {
+        clearTimeout(timeoutId);
+      } catch (error) {
+        console.warn('Error clearing timeout:', error);
+      }
+    });
+    this.activeTimeouts.clear();
+
+    // Stop all streams
+    this.activeStreams.forEach(stream => {
+      try {
+        stream.getTracks().forEach(track => {
+          track.stop();
+        });
+      } catch (error) {
+        console.warn('Error stopping stream:', error);
+      }
+    });
+    this.activeStreams.clear();
+  }
+}
+
+/**
+ * Get TURN server configuration from environment or fallback
+ */
+const getTurnServerConfig = () => {
+  // Check for environment variables first (secure approach)
+  if (typeof process !== 'undefined' && process.env) {
+    const turnUrl = process.env.REACT_APP_TURN_URL;
+    const turnUsername = process.env.REACT_APP_TURN_USERNAME;
+    const turnCredential = process.env.REACT_APP_TURN_CREDENTIAL;
+
+    if (turnUrl && turnUsername && turnCredential) {
+      return [{
+        urls: turnUrl,
+        username: turnUsername,
+        credential: turnCredential
+      }];
+    }
+  }
+
+  // Fallback to public test servers (with warning)
+  console.warn('⚠️ Using public TURN servers for testing. Configure environment variables for production.');
+  return [
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ];
+};
+
+/**
+ * Test WebRTC connectivity with comprehensive reporting and resource management
+ */
+export const testWebRTCConnectivity = async (options = {}) => {
+  const testManager = new ConnectionTestManager();
+
   const results = {
     timestamp: new Date().toISOString(),
     browser: getBrowserInfo(),
     overall: 'unknown',
     tests: {
+      browser: { status: 'pending', details: null },
       media: { status: 'pending', details: null },
       webrtc: { status: 'pending', details: null },
       network: { status: 'pending', details: null },
       turn: { status: 'pending', details: null }
     },
-    recommendations: []
+    recommendations: [],
+    testId: `test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   };
 
   try {
     console.log('🧪 Starting comprehensive WebRTC connectivity test...');
 
+    // Validate browser compatibility first
+    results.tests.browser = await testBrowserCompatibility();
+
+    if (results.tests.browser.status === 'failed') {
+      throw new Error('Browser not compatible with WebRTC requirements');
+    }
+
     // Test 1: Media Devices
-    results.tests.media = await testMediaDevices();
+    if (!testManager.isAborted()) {
+      results.tests.media = await testMediaDevices(testManager);
+    }
 
     // Test 2: WebRTC Support
-    results.tests.webrtc = await testWebRTCSupport();
+    if (!testManager.isAborted()) {
+      results.tests.webrtc = await testWebRTCSupport(testManager);
+    }
 
     // Test 3: Network Connectivity
-    results.tests.network = await testNetworkConnectivity();
+    if (!testManager.isAborted()) {
+      results.tests.network = await testNetworkConnectivity(testManager);
+    }
 
     // Test 4: TURN Server Connectivity
-    results.tests.turn = await testTurnServers();
+    if (!testManager.isAborted()) {
+      results.tests.turn = await testTurnServers(testManager);
+    }
 
     // Generate overall assessment
     results.overall = calculateOverallStatus(results.tests);
@@ -47,59 +225,229 @@ export const testWebRTCConnectivity = async () => {
   } catch (error) {
     console.error('❌ Connectivity test failed:', error);
     results.overall = 'failed';
-    results.error = error.message;
+    results.error = {
+      message: error.message,
+      code: error.name || 'UNKNOWN_ERROR',
+      timestamp: new Date().toISOString()
+    };
     return results;
+  } finally {
+    // Always cleanup resources
+    try {
+      testManager.cleanup();
+    } catch (cleanupError) {
+      console.warn('⚠️ Error during test cleanup:', cleanupError);
+    }
   }
 };
 
 /**
- * Test media device access and capabilities
+ * Test browser compatibility and minimum requirements
  */
-const testMediaDevices = async () => {
+const testBrowserCompatibility = async () => {
   try {
     const test = {
       status: 'testing',
       details: {
-        video: { available: false, quality: 'none', error: null },
-        audio: { available: false, quality: 'none', error: null },
-        devices: { video: 0, audio: 0 }
+        browser: getBrowserInfo(),
+        isSupported: false,
+        requiredFeatures: {},
+        missingFeatures: [],
+        warnings: []
       }
     };
 
-    // Check device enumeration
+    // Check required features
+    const requiredFeatures = {
+      RTCPeerConnection: !!window.RTCPeerConnection,
+      getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      enumerateDevices: !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices),
+      mediaRecorder: !!window.MediaRecorder,
+      webRTCStats: !!(window.RTCPeerConnection && RTCPeerConnection.prototype.getStats)
+    };
+
+    test.details.requiredFeatures = requiredFeatures;
+
+    // Check for missing features
+    Object.entries(requiredFeatures).forEach(([feature, supported]) => {
+      if (!supported) {
+        test.details.missingFeatures.push(feature);
+      }
+    });
+
+    // Browser-specific checks
+    const browserInfo = test.details.browser;
+    if (browserInfo.name === 'Chrome' && parseInt(browserInfo.version) < 80) {
+      test.details.warnings.push('Chrome version 80+ recommended for full WebRTC support');
+    } else if (browserInfo.name === 'Firefox' && parseInt(browserInfo.version) < 75) {
+      test.details.warnings.push('Firefox version 75+ recommended for full WebRTC support');
+    } else if (browserInfo.name === 'Safari' && parseInt(browserInfo.version) < 13) {
+      test.details.warnings.push('Safari version 13+ recommended for full WebRTC support');
+    }
+
+    // Check for secure context (HTTPS requirement)
+    if (!window.isSecureContext) {
+      test.details.warnings.push('HTTPS required for getUserMedia in production');
+    }
+
+    // Determine support status
+    const criticalFeatures = ['RTCPeerConnection', 'getUserMedia'];
+    const hasCriticalFeatures = criticalFeatures.every(feature => requiredFeatures[feature]);
+
+    test.details.isSupported = hasCriticalFeatures;
+    test.status = hasCriticalFeatures ? 'passed' : 'failed';
+
+    return test;
+  } catch (error) {
+    return {
+      status: 'failed',
+      error: {
+        message: error.message,
+        code: 'BROWSER_CHECK_FAILED'
+      }
+    };
+  }
+};
+
+/**
+ * Test media device access and capabilities with proper resource management
+ */
+const testMediaDevices = async (testManager) => {
+  try {
+    const test = {
+      status: 'testing',
+      details: {
+        video: { available: false, quality: 'none', error: null, settings: null },
+        audio: { available: false, quality: 'none', error: null, settings: null },
+        devices: { video: 0, audio: 0, total: 0 },
+        permissions: { video: 'unknown', audio: 'unknown' }
+      }
+    };
+
+    if (testManager.isAborted()) {
+      throw new Error('Test aborted');
+    }
+
+    // Check device enumeration with timeout
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
+      const enumeratePromise = navigator.mediaDevices.enumerateDevices();
+      const timeoutPromise = new Promise((_, reject) => {
+        testManager.createTrackedTimeout(() => {
+          reject(new Error('Device enumeration timeout'));
+        }, 5000);
+      });
+
+      const devices = await Promise.race([enumeratePromise, timeoutPromise]);
+
       test.details.devices.video = devices.filter(d => d.kind === 'videoinput').length;
       test.details.devices.audio = devices.filter(d => d.kind === 'audioinput').length;
+      test.details.devices.total = devices.length;
+
+      console.log(`📱 Found ${test.details.devices.video} video and ${test.details.devices.audio} audio devices`);
     } catch (error) {
-      console.warn('Device enumeration failed:', error);
+      console.warn('⚠️ Device enumeration failed:', error);
+      test.details.devices.error = error.message;
     }
 
-    // Test video access
+    if (testManager.isAborted()) {
+      throw new Error('Test aborted');
+    }
+
+    // Test video access with comprehensive error handling
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 }
-      });
+      const videoConstraints = {
+        video: {
+          width: { ideal: 640, max: 1280, min: 320 },
+          height: { ideal: 480, max: 720, min: 240 },
+          frameRate: { ideal: 30, max: 30, min: 15 }
+        }
+      };
+
+      const videoStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
+      testManager.trackStream(videoStream);
+
       const videoTrack = videoStream.getVideoTracks()[0];
-      const settings = videoTrack.getSettings();
+      if (videoTrack) {
+        const settings = videoTrack.getSettings();
+        const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
 
-      test.details.video.available = true;
-      test.details.video.quality = determineVideoQuality(settings);
+        test.details.video.available = true;
+        test.details.video.quality = determineVideoQuality(settings);
+        test.details.video.settings = settings;
+        test.details.video.capabilities = capabilities;
+        test.details.permissions.video = 'granted';
 
-      videoStream.getTracks().forEach(track => track.stop());
+        console.log(`📹 Video test passed: ${settings.width}x${settings.height} at ${settings.frameRate}fps`);
+      }
+
+      // Clean up immediately
+      videoStream.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (stopError) {
+          console.warn('⚠️ Error stopping video track:', stopError);
+        }
+      });
+
     } catch (error) {
-      test.details.video.error = error.name;
+      console.warn('⚠️ Video access failed:', error);
+      test.details.video.error = {
+        name: error.name,
+        message: error.message,
+        code: getMediaErrorCode(error)
+      };
+      test.details.permissions.video = getPermissionStatus(error);
     }
 
-    // Test audio access
-    try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      test.details.audio.available = true;
-      test.details.audio.quality = 'good';
+    if (testManager.isAborted()) {
+      throw new Error('Test aborted');
+    }
 
-      audioStream.getTracks().forEach(track => track.stop());
+    // Test audio access with comprehensive error handling
+    try {
+      const audioConstraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: { ideal: 44100 }
+        }
+      };
+
+      const audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+      testManager.trackStream(audioStream);
+
+      const audioTrack = audioStream.getAudioTracks()[0];
+      if (audioTrack) {
+        const settings = audioTrack.getSettings();
+        const capabilities = audioTrack.getCapabilities ? audioTrack.getCapabilities() : {};
+
+        test.details.audio.available = true;
+        test.details.audio.quality = determineAudioQuality(settings);
+        test.details.audio.settings = settings;
+        test.details.audio.capabilities = capabilities;
+        test.details.permissions.audio = 'granted';
+
+        console.log(`🎤 Audio test passed: ${settings.sampleRate}Hz, EC:${settings.echoCancellation}`);
+      }
+
+      // Clean up immediately
+      audioStream.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (stopError) {
+          console.warn('⚠️ Error stopping audio track:', stopError);
+        }
+      });
+
     } catch (error) {
-      test.details.audio.error = error.name;
+      console.warn('⚠️ Audio access failed:', error);
+      test.details.audio.error = {
+        name: error.name,
+        message: error.message,
+        code: getMediaErrorCode(error)
+      };
+      test.details.permissions.audio = getPermissionStatus(error);
     }
 
     // Determine test status
@@ -112,18 +460,78 @@ const testMediaDevices = async () => {
     }
 
     return test;
+
   } catch (error) {
     return {
       status: 'failed',
-      error: error.message
+      error: {
+        message: error.message,
+        code: 'MEDIA_TEST_FAILED',
+        timestamp: new Date().toISOString()
+      }
     };
   }
 };
 
 /**
- * Test WebRTC API support
+ * Get media error code for better error categorization
  */
-const testWebRTCSupport = async () => {
+const getMediaErrorCode = (error) => {
+  switch (error.name) {
+    case 'NotAllowedError':
+      return 'PERMISSION_DENIED';
+    case 'NotFoundError':
+      return 'DEVICE_NOT_FOUND';
+    case 'NotReadableError':
+      return 'DEVICE_IN_USE';
+    case 'OverconstrainedError':
+      return 'CONSTRAINTS_NOT_SATISFIED';
+    case 'SecurityError':
+      return 'SECURITY_ERROR';
+    case 'TypeError':
+      return 'INVALID_CONSTRAINTS';
+    default:
+      return 'UNKNOWN_MEDIA_ERROR';
+  }
+};
+
+/**
+ * Get permission status from error
+ */
+const getPermissionStatus = (error) => {
+  switch (error.name) {
+    case 'NotAllowedError':
+      return 'denied';
+    case 'NotFoundError':
+      return 'no_device';
+    case 'NotReadableError':
+      return 'device_busy';
+    default:
+      return 'unknown';
+  }
+};
+
+/**
+ * Determine audio quality based on settings
+ */
+const determineAudioQuality = (settings) => {
+  const { sampleRate = 0, echoCancellation = false, noiseSuppression = false } = settings;
+
+  if (sampleRate >= 44100 && echoCancellation && noiseSuppression) {
+    return 'excellent';
+  } else if (sampleRate >= 22050 && (echoCancellation || noiseSuppression)) {
+    return 'good';
+  } else if (sampleRate >= 16000) {
+    return 'fair';
+  } else {
+    return 'poor';
+  }
+};
+
+/**
+ * Test WebRTC API support with comprehensive validation
+ */
+const testWebRTCSupport = async (testManager) => {
   try {
     const test = {
       status: 'testing',
@@ -131,105 +539,222 @@ const testWebRTCSupport = async () => {
         rtcPeerConnection: !!window.RTCPeerConnection,
         getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
         mediaRecorder: !!window.MediaRecorder,
-        webrtcAdapterJS: false
+        webrtcAdapterJS: false,
+        basicFunctionality: false,
+        dataChannels: false,
+        statistics: false
       }
     };
 
-    // Test basic WebRTC functionality
+    if (testManager.isAborted()) {
+      throw new Error('Test aborted');
+    }
+
+    // Test basic WebRTC functionality with proper cleanup
     if (test.details.rtcPeerConnection) {
       try {
-        const pc = new RTCPeerConnection();
+        const pc = testManager.createTrackedPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        // Test data channel creation
+        try {
+          const dataChannel = pc.createDataChannel('test', { ordered: true });
+          test.details.dataChannels = true;
+          dataChannel.close();
+        } catch (dcError) {
+          console.warn('⚠️ Data channel test failed:', dcError);
+          test.details.dataChannelError = dcError.message;
+        }
+
+        // Test statistics API
+        try {
+          await pc.getStats();
+          test.details.statistics = true;
+        } catch (statsError) {
+          console.warn('⚠️ Statistics API test failed:', statsError);
+          test.details.statisticsError = statsError.message;
+        }
+
         pc.close();
         test.details.basicFunctionality = true;
+        console.log('✅ WebRTC basic functionality test passed');
+
       } catch (error) {
         test.details.basicFunctionality = false;
-        test.details.basicError = error.message;
+        test.details.basicError = {
+          message: error.message,
+          code: 'WEBRTC_BASIC_FAILED'
+        };
+        console.warn('⚠️ WebRTC basic functionality test failed:', error);
       }
     }
 
     // Check for adapter.js
     test.details.webrtcAdapterJS = !!(window.adapter && window.adapter.browserDetails);
 
+    // Additional WebRTC feature detection
+    test.details.features = {
+      insertableStreams: !!window.RTCRtpScriptTransform,
+      simulcast: true, // Most modern browsers support this
+      svc: false, // Scalable Video Coding - limited support
+      av1: false, // Check AV1 codec support
+      vp9: false  // Check VP9 codec support
+    };
+
     // Determine status
     const requiredFeatures = [
       test.details.rtcPeerConnection,
-      test.details.getUserMedia
+      test.details.getUserMedia,
+      test.details.basicFunctionality
     ];
 
-    test.status = requiredFeatures.every(feature => feature) ? 'passed' : 'failed';
+    const optionalFeatures = [
+      test.details.dataChannels,
+      test.details.statistics
+    ];
+
+    if (requiredFeatures.every(feature => feature)) {
+      test.status = optionalFeatures.some(feature => feature) ? 'passed' : 'partial';
+    } else {
+      test.status = 'failed';
+    }
 
     return test;
+
   } catch (error) {
     return {
       status: 'failed',
-      error: error.message
+      error: {
+        message: error.message,
+        code: 'WEBRTC_TEST_FAILED',
+        timestamp: new Date().toISOString()
+      }
     };
   }
 };
 
 /**
- * Test network connectivity to STUN/TURN servers
+ * Test network connectivity to STUN servers with proper resource management
  */
-const testNetworkConnectivity = async () => {
+const testNetworkConnectivity = async (testManager) => {
   try {
     const test = {
       status: 'testing',
       details: {
         stunServers: [],
         iceGathering: 'unknown',
-        connectivity: 'unknown'
+        connectivity: 'unknown',
+        candidatesFound: 0,
+        candidateTypes: [],
+        networkType: 'unknown'
       }
     };
 
-    // Test ICE gathering
-    const pc = new RTCPeerConnection({
+    if (testManager.isAborted()) {
+      throw new Error('Test aborted');
+    }
+
+    const pc = testManager.createTrackedPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' }
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun1.l.google.com:19302' }
       ]
     });
 
     const candidates = [];
 
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        pc.close();
-        test.details.iceGathering = candidates.length > 0 ? 'partial' : 'failed';
-        test.details.candidatesFound = candidates.length;
-        test.status = candidates.length > 0 ? 'passed' : 'failed';
-        resolve(test);
-      }, 5000);
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          candidates.push({
-            type: event.candidate.type,
-            protocol: event.candidate.protocol,
-            address: event.candidate.address
-          });
-        } else {
-          // ICE gathering complete
-          clearTimeout(timeout);
-          pc.close();
-
-          test.details.iceGathering = 'complete';
+      const timeoutId = testManager.createTrackedTimeout(() => {
+        if (!testManager.isAborted()) {
+          test.details.iceGathering = candidates.length > 0 ? 'partial' : 'timeout';
           test.details.candidatesFound = candidates.length;
           test.details.candidateTypes = [...new Set(candidates.map(c => c.type))];
-
           test.status = candidates.length > 0 ? 'passed' : 'failed';
+
+          console.log(`🌐 Network test completed: ${candidates.length} candidates found`);
           resolve(test);
+        }
+      }, 8000); // Increased timeout for better reliability
+
+      pc.onicecandidate = (event) => {
+        try {
+          if (testManager.isAborted()) {
+            return;
+          }
+
+          if (event.candidate) {
+            const candidateInfo = {
+              type: event.candidate.type,
+              protocol: event.candidate.protocol,
+              address: event.candidate.address,
+              port: event.candidate.port,
+              priority: event.candidate.priority
+            };
+
+            candidates.push(candidateInfo);
+            console.log(`🧊 ICE candidate: ${candidateInfo.type} (${candidateInfo.protocol})`);
+
+          } else {
+            // ICE gathering complete
+            testManager.clearTrackedTimeout(timeoutId);
+
+            test.details.iceGathering = 'complete';
+            test.details.candidatesFound = candidates.length;
+            test.details.candidateTypes = [...new Set(candidates.map(c => c.type))];
+
+            // Analyze network type based on candidates
+            if (candidates.some(c => c.type === 'srflx')) {
+              test.details.networkType = 'nat';
+            } else if (candidates.some(c => c.type === 'host')) {
+              test.details.networkType = 'direct';
+            } else {
+              test.details.networkType = 'restricted';
+            }
+
+            test.status = candidates.length > 0 ? 'passed' : 'failed';
+            console.log(`✅ ICE gathering complete: ${candidates.length} candidates`);
+            resolve(test);
+          }
+        } catch (candidateError) {
+          console.warn('⚠️ Error processing ICE candidate:', candidateError);
         }
       };
 
+      pc.onicegatheringstatechange = () => {
+        console.log(`🔄 ICE gathering state: ${pc.iceGatheringState}`);
+      };
+
       // Create a data channel to trigger ICE gathering
-      pc.createDataChannel('test');
-      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+      try {
+        pc.createDataChannel('connectivity-test');
+        pc.createOffer()
+          .then(offer => pc.setLocalDescription(offer))
+          .catch(error => {
+            console.warn('⚠️ Error creating offer for network test:', error);
+            testManager.clearTrackedTimeout(timeoutId);
+            test.status = 'failed';
+            test.error = { message: error.message, code: 'OFFER_FAILED' };
+            resolve(test);
+          });
+      } catch (error) {
+        console.warn('⚠️ Error setting up network test:', error);
+        testManager.clearTrackedTimeout(timeoutId);
+        test.status = 'failed';
+        test.error = { message: error.message, code: 'SETUP_FAILED' };
+        resolve(test);
+      }
     });
 
   } catch (error) {
     return {
       status: 'failed',
-      error: error.message
+      error: {
+        message: error.message,
+        code: 'NETWORK_TEST_FAILED',
+        timestamp: new Date().toISOString()
+      }
     };
   }
 };

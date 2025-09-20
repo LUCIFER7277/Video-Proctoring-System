@@ -11,6 +11,7 @@ class AdvancedVideoRecordingService {
     this.videoRecorder = null;
     this.audioRecorder = null;
     this.screenRecorder = null;
+    this.screenStream = null;
 
     // Recording data
     this.recordingData = [];
@@ -19,6 +20,12 @@ class AdvancedVideoRecordingService {
 
     // Event handling
     this.eventCallbacks = [];
+
+    // Cleanup tracking
+    this.intervals = new Set();
+    this.timeouts = new Set();
+    this.animationFrames = new Set();
+    this.audioContext = null;
 
     // Configuration
     this.config = {
@@ -71,14 +78,31 @@ class AdvancedVideoRecordingService {
     try {
       console.log('🎥 Initializing Advanced Video Recording Service...');
 
-      // Get media constraints
+      // Validate browser support
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('MediaDevices API not supported');
+      }
+
+      if (!window.MediaRecorder) {
+        throw new Error('MediaRecorder API not supported');
+      }
+
+      // Get media constraints with validation
       const constraints = {
         video: this.config.video,
         audio: enableAudio ? this.config.audio : false
       };
 
-      // Request media access
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Add timeout for media access
+      const mediaPromise = navigator.mediaDevices.getUserMedia(constraints);
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Media access timeout (10s)'));
+        }, 10000);
+        this.timeouts.add(timeoutId);
+      });
+
+      this.mediaStream = await Promise.race([mediaPromise, timeoutPromise]);
 
       // Set up video element
       if (videoElement) {
@@ -155,49 +179,79 @@ class AdvancedVideoRecordingService {
   }
 
   monitorVideoQuality(videoTrack) {
-    setInterval(() => {
+    const intervalId = setInterval(() => {
       if (videoTrack && videoTrack.readyState === 'live') {
-        const settings = videoTrack.getSettings();
+        try {
+          const settings = videoTrack.getSettings();
 
-        // Update quality metrics
-        this.stats.qualityMetrics.currentResolution = {
-          width: settings.width,
-          height: settings.height
-        };
-        this.stats.qualityMetrics.currentFrameRate = settings.frameRate;
+          // Update quality metrics
+          this.stats.qualityMetrics.currentResolution = {
+            width: settings.width,
+            height: settings.height
+          };
+          this.stats.qualityMetrics.currentFrameRate = settings.frameRate;
+        } catch (error) {
+          console.warn('Video quality monitoring error:', error);
+        }
+      } else {
+        // Stop monitoring if track is not live
+        clearInterval(intervalId);
+        this.intervals.delete(intervalId);
       }
     }, 5000);
+
+    this.intervals.add(intervalId);
   }
 
   monitorAudioQuality(audioTrack) {
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioContext.createMediaStreamSource(this.mediaStream);
-      const analyzer = audioContext.createAnalyser();
+      // Store audio context for cleanup
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+      const analyzer = this.audioContext.createAnalyser();
 
       source.connect(analyzer);
       analyzer.fftSize = 256;
 
       const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+      let isMonitoring = true;
 
       const checkAudioLevel = () => {
-        if (this.isRecording) {
-          analyzer.getByteFrequencyData(dataArray);
+        if (this.isRecording && isMonitoring && audioTrack.readyState === 'live') {
+          try {
+            analyzer.getByteFrequencyData(dataArray);
 
-          // Calculate average audio level
-          const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
-          this.stats.qualityMetrics.audioLevels.push(average);
+            // Calculate average audio level
+            const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+            this.stats.qualityMetrics.audioLevels.push(average);
 
-          // Keep only last 100 measurements
-          if (this.stats.qualityMetrics.audioLevels.length > 100) {
-            this.stats.qualityMetrics.audioLevels = this.stats.qualityMetrics.audioLevels.slice(-100);
+            // Keep only last 100 measurements
+            if (this.stats.qualityMetrics.audioLevels.length > 100) {
+              this.stats.qualityMetrics.audioLevels = this.stats.qualityMetrics.audioLevels.slice(-100);
+            }
+
+            const frameId = requestAnimationFrame(checkAudioLevel);
+            this.animationFrames.add(frameId);
+          } catch (error) {
+            console.warn('Audio level check error:', error);
+            isMonitoring = false;
           }
-
-          requestAnimationFrame(checkAudioLevel);
+        } else {
+          isMonitoring = false;
         }
       };
 
-      checkAudioLevel();
+      // Start monitoring only if audio context is not suspended
+      if (this.audioContext.state !== 'suspended') {
+        checkAudioLevel();
+      } else {
+        // Resume audio context if suspended
+        this.audioContext.resume().then(() => {
+          checkAudioLevel();
+        }).catch(error => {
+          console.warn('Audio context resume failed:', error);
+        });
+      }
 
     } catch (error) {
       console.warn('Audio monitoring setup failed:', error);
@@ -420,11 +474,14 @@ class AdvancedVideoRecordingService {
   }
 
   startChunking() {
-    this.chunkingInterval = setInterval(() => {
+    const intervalId = setInterval(() => {
       if (this.isRecording && !this.isPaused) {
         this.createChunk();
       }
     }, this.config.recording.timeSlice);
+
+    this.intervals.add(intervalId);
+    this.chunkingInterval = intervalId;
   }
 
   createChunk() {
@@ -462,11 +519,14 @@ class AdvancedVideoRecordingService {
   }
 
   startAutoBackup() {
-    this.backupInterval = setInterval(() => {
+    const intervalId = setInterval(() => {
       if (this.recordingChunks.length > 0) {
         this.backupChunks();
       }
     }, this.config.storage.backupInterval);
+
+    this.intervals.add(intervalId);
+    this.backupInterval = intervalId;
   }
 
   async backupChunks() {
@@ -525,6 +585,12 @@ class AdvancedVideoRecordingService {
 
   async downloadRecording(sessionId, format = 'webm') {
     try {
+      // Validate format
+      const allowedFormats = ['webm', 'mp4', 'avi'];
+      if (!allowedFormats.includes(format)) {
+        throw new Error(`Unsupported format: ${format}`);
+      }
+
       const recording = await this.storageManager.getRecording(sessionId);
       if (!recording) {
         throw new Error('Recording not found');
@@ -535,24 +601,35 @@ class AdvancedVideoRecordingService {
         throw new Error('Video data not found');
       }
 
-      // Create download link
+      // Validate blob size (max 1GB)
+      if (blob.size > 1024 * 1024 * 1024) {
+        throw new Error('Recording too large to download');
+      }
+
+      // Create download link with proper cleanup
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `interview_${sessionId}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
 
-      console.log('📥 Recording downloaded');
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `interview_${sessionId}.${format}`;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
 
-      this.triggerEvent({
-        type: 'recording_downloaded',
-        timestamp: new Date(),
-        sessionId,
-        format
-      });
+        console.log('📥 Recording downloaded');
+
+        this.triggerEvent({
+          type: 'recording_downloaded',
+          timestamp: new Date(),
+          sessionId,
+          format
+        });
+      } finally {
+        // Always revoke URL to prevent memory leak
+        URL.revokeObjectURL(url);
+      }
 
     } catch (error) {
       console.error('Download failed:', error);
@@ -610,40 +687,108 @@ class AdvancedVideoRecordingService {
 
   async cleanup() {
     try {
+      console.log('🧹 Starting video recording service cleanup...');
+
       // Stop recording if active
       if (this.isRecording) {
         await this.stopRecording();
       }
 
-      // Clear intervals
-      if (this.chunkingInterval) {
-        clearInterval(this.chunkingInterval);
-      }
-      if (this.backupInterval) {
-        clearInterval(this.backupInterval);
+      // Clear all intervals
+      this.intervals.forEach(intervalId => {
+        clearInterval(intervalId);
+      });
+      this.intervals.clear();
+
+      // Clear all timeouts
+      this.timeouts.forEach(timeoutId => {
+        clearTimeout(timeoutId);
+      });
+      this.timeouts.clear();
+
+      // Cancel all animation frames
+      this.animationFrames.forEach(frameId => {
+        cancelAnimationFrame(frameId);
+      });
+      this.animationFrames.clear();
+
+      // Close audio context
+      if (this.audioContext && this.audioContext.state !== 'closed') {
+        try {
+          await this.audioContext.close();
+        } catch (error) {
+          console.warn('Audio context close error:', error);
+        }
       }
 
       // Stop media streams
       if (this.mediaStream) {
-        this.mediaStream.getTracks().forEach(track => track.stop());
+        this.mediaStream.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (error) {
+            console.warn('Track stop error:', error);
+          }
+        });
+        this.mediaStream = null;
       }
+
       if (this.screenStream) {
-        this.screenStream.getTracks().forEach(track => track.stop());
+        this.screenStream.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (error) {
+            console.warn('Screen track stop error:', error);
+          }
+        });
+        this.screenStream = null;
       }
 
       // Clean up recorders
       if (this.videoRecorder) {
-        this.videoRecorder.destroy();
+        try {
+          this.videoRecorder.destroy();
+        } catch (error) {
+          console.warn('Video recorder destroy error:', error);
+        }
+        this.videoRecorder = null;
       }
+
       if (this.screenRecorder) {
-        this.screenRecorder.destroy();
+        try {
+          this.screenRecorder.destroy();
+        } catch (error) {
+          console.warn('Screen recorder destroy error:', error);
+        }
+        this.screenRecorder = null;
       }
+
+      // Clear data arrays
+      this.recordingData = [];
+      this.recordingChunks = [];
+      this.currentSession = null;
 
       // Reset state
       this.isInitialized = false;
+      this.isRecording = false;
+      this.isPaused = false;
       this.eventCallbacks = [];
 
-      console.log('🧹 Video recording service cleaned up');
+      // Reset stats
+      this.stats = {
+        startTime: null,
+        duration: 0,
+        totalSize: 0,
+        chunkCount: 0,
+        errorCount: 0,
+        qualityMetrics: {
+          averageBitrate: 0,
+          droppedFrames: 0,
+          audioLevels: []
+        }
+      };
+
+      console.log('✅ Video recording service cleaned up successfully');
 
     } catch (error) {
       console.error('Cleanup error:', error);
@@ -689,16 +834,42 @@ class RecordingStorageManager {
   }
 
   async saveRecording(recording) {
-    if (!this.db) await this.initialize();
+    try {
+      if (!this.db) await this.initialize();
 
-    const transaction = this.db.transaction(['recordings'], 'readwrite');
-    const store = transaction.objectStore('recordings');
+      // Check storage quota before saving
+      if ('storage' in navigator && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        const availableSpace = estimate.quota - estimate.usage;
+        const recordingSize = recording.totalSize || 0;
 
-    return new Promise((resolve, reject) => {
-      const request = store.put(recording);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+        if (recordingSize > availableSpace) {
+          throw new Error('Insufficient storage space');
+        }
+      }
+
+      const transaction = this.db.transaction(['recordings'], 'readwrite');
+      const store = transaction.objectStore('recordings');
+
+      return new Promise((resolve, reject) => {
+        const request = store.put(recording);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+
+        // Add timeout for transaction
+        const timeout = setTimeout(() => {
+          reject(new Error('Storage transaction timeout'));
+        }, 10000);
+
+        request.onsuccess = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+      });
+    } catch (error) {
+      console.error('Save recording error:', error);
+      throw error;
+    }
   }
 
   async getRecording(sessionId) {

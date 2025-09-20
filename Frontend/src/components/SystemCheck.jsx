@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const SystemCheck = () => {
@@ -16,47 +16,101 @@ const SystemCheck = () => {
   const [overallStatus, setOverallStatus] = useState('running');
   const [videoStream, setVideoStream] = useState(null);
   const [showVideo, setShowVideo] = useState(false);
+  const [error, setError] = useState(null);
+  const [isCheckCancelled, setIsCheckCancelled] = useState(false);
+
+  // Refs for cleanup
+  const streamRefs = useRef(new Set());
+  const timeoutRefs = useRef(new Set());
+  const abortController = useRef(new AbortController());
+
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    setIsCheckCancelled(true);
+
+    // Stop all media streams
+    streamRefs.current.forEach(stream => {
+      if (stream && stream.getTracks) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    });
+    streamRefs.current.clear();
+
+    // Clear all timeouts
+    timeoutRefs.current.forEach(timeoutId => {
+      clearTimeout(timeoutId);
+    });
+    timeoutRefs.current.clear();
+
+    // Abort any ongoing requests
+    abortController.current.abort();
+
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+      setVideoStream(null);
+    }
+  }, [videoStream]);
 
   useEffect(() => {
     runSystemChecks();
-    return () => {
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
+    return cleanup;
+  }, [cleanup]);
 
-  const runSystemChecks = async () => {
-    const results = { ...checks };
-
+  const runSystemChecks = useCallback(async () => {
     try {
-      // Browser Check
-      results.browser = await checkBrowser();
-      setChecks({ ...results });
+      setError(null);
+      setIsCheckCancelled(false);
+      setOverallStatus('running');
 
-      // WebGL Check
-      results.webgl = await checkWebGL();
-      setChecks({ ...results });
+      // Reset abort controller for new check run
+      abortController.current = new AbortController();
 
-      // TensorFlow Check
-      results.tensorflow = await checkTensorFlow();
-      setChecks({ ...results });
+      const results = { ...checks };
 
-      // Camera Check
-      results.camera = await checkCamera();
-      setChecks({ ...results });
+      // Helper function to update individual check
+      const updateCheck = (key, result) => {
+        if (isCheckCancelled) return;
+        setChecks(prev => ({
+          ...prev,
+          [key]: result
+        }));
+      };
 
-      // Microphone Check
-      results.microphone = await checkMicrophone();
-      setChecks({ ...results });
+      // Run checks sequentially with cancellation support
+      const checkSequence = [
+        ['browser', checkBrowser],
+        ['webgl', checkWebGL],
+        ['tensorflow', checkTensorFlow],
+        ['camera', checkCamera],
+        ['microphone', checkMicrophone],
+        ['models', checkAIModels],
+        ['performance', checkPerformance]
+      ];
 
-      // AI Models Check
-      results.models = await checkAIModels();
-      setChecks({ ...results });
+      for (const [key, checkFunction] of checkSequence) {
+        if (isCheckCancelled || abortController.current.signal.aborted) {
+          console.log('System checks cancelled');
+          return;
+        }
 
-      // Performance Check
-      results.performance = await checkPerformance();
-      setChecks({ ...results });
+        try {
+          const result = await checkFunction();
+          results[key] = result;
+          updateCheck(key, result);
+        } catch (error) {
+          console.error(`${key} check failed:`, error);
+          const errorResult = {
+            status: 'fail',
+            message: `${key} check failed: ${error.message}`
+          };
+          results[key] = errorResult;
+          updateCheck(key, errorResult);
+        }
+      }
+
+      if (isCheckCancelled || abortController.current.signal.aborted) {
+        return;
+      }
 
       // Determine overall status
       const allPassed = Object.values(results).every(check => check.status === 'pass');
@@ -72,9 +126,10 @@ const SystemCheck = () => {
 
     } catch (error) {
       console.error('System check failed:', error);
+      setError(error.message);
       setOverallStatus('fail');
     }
-  };
+  }, [checks, isCheckCancelled]);
 
   const checkBrowser = async () => {
     const userAgent = navigator.userAgent;
@@ -141,85 +196,235 @@ const SystemCheck = () => {
 
   const checkCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 640, height: 480 }
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Camera check timeout (10s)'));
+        }, 10000);
+        timeoutRefs.current.add(timeoutId);
       });
 
+      const cameraPromise = navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      });
+
+      const stream = await Promise.race([cameraPromise, timeoutPromise]);
+
+      if (abortController.current.signal.aborted) {
+        stream.getTracks().forEach(track => track.stop());
+        throw new Error('Check cancelled');
+      }
+
+      // Track stream for cleanup
+      streamRefs.current.add(stream);
       setVideoStream(stream);
       setShowVideo(true);
 
       const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) {
+        throw new Error('No video track available');
+      }
+
       const settings = videoTrack.getSettings();
+      const capabilities = videoTrack.getCapabilities();
 
       return {
         status: 'pass',
-        message: `Camera working (${settings.width}x${settings.height})`
+        message: `Camera working (${settings.width || 'unknown'}x${settings.height || 'unknown'})`
       };
     } catch (error) {
+      let message = 'Camera access failed';
+
+      if (error.name === 'NotAllowedError') {
+        message = 'Camera permission denied';
+      } else if (error.name === 'NotFoundError') {
+        message = 'No camera device found';
+      } else if (error.name === 'NotReadableError') {
+        message = 'Camera already in use';
+      } else if (error.message.includes('timeout')) {
+        message = 'Camera access timeout';
+      } else {
+        message = `Camera error: ${error.message}`;
+      }
+
       return {
         status: 'fail',
-        message: `Camera access denied: ${error.message}`
+        message: message
       };
     }
   };
 
   const checkMicrophone = async () => {
     try {
-      if (!videoStream) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Microphone check timeout (5s)'));
+        }, 5000);
+        timeoutRefs.current.add(timeoutId);
+      });
+
+      const microphonePromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+
+      const stream = await Promise.race([microphonePromise, timeoutPromise]);
+
+      if (abortController.current.signal.aborted) {
         stream.getTracks().forEach(track => track.stop());
+        throw new Error('Check cancelled');
       }
+
+      // Track stream for cleanup and immediately stop it
+      streamRefs.current.add(stream);
+      const audioTrack = stream.getAudioTracks()[0];
+
+      if (!audioTrack) {
+        throw new Error('No audio track available');
+      }
+
+      const settings = audioTrack.getSettings();
+
+      // Stop the test stream immediately
+      stream.getTracks().forEach(track => track.stop());
+      streamRefs.current.delete(stream);
 
       return {
         status: 'pass',
-        message: 'Microphone access granted'
+        message: `Microphone working (${settings.sampleRate || 'unknown'}Hz)`
       };
     } catch (error) {
+      let message = 'Microphone access failed';
+
+      if (error.name === 'NotAllowedError') {
+        message = 'Microphone permission denied';
+      } else if (error.name === 'NotFoundError') {
+        message = 'No microphone device found';
+      } else if (error.name === 'NotReadableError') {
+        message = 'Microphone already in use';
+      } else if (error.message.includes('timeout')) {
+        message = 'Microphone access timeout';
+      } else {
+        message = `Microphone error: ${error.message}`;
+      }
+
       return {
         status: 'fail',
-        message: `Microphone access denied: ${error.message}`
+        message: message
       };
     }
   };
 
   const checkAIModels = async () => {
     try {
-      // Test loading face detection model
-      const blazeface = await import('@tensorflow-models/blazeface');
-      await blazeface.load();
+      // Add timeout for model loading
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('AI models loading timeout (30s)'));
+        }, 30000);
+        timeoutRefs.current.add(timeoutId);
+      });
 
-      // Test loading object detection model
-      const cocoSsd = await import('@tensorflow-models/coco-ssd');
-      await cocoSsd.load();
+      const modelsPromise = (async () => {
+        if (abortController.current.signal.aborted) {
+          throw new Error('Check cancelled');
+        }
+
+        // Test loading face detection model
+        const blazeface = await import('@tensorflow-models/blazeface');
+        if (abortController.current.signal.aborted) {
+          throw new Error('Check cancelled');
+        }
+
+        const faceModel = await blazeface.load();
+        if (abortController.current.signal.aborted) {
+          throw new Error('Check cancelled');
+        }
+
+        // Test loading object detection model
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
+        if (abortController.current.signal.aborted) {
+          throw new Error('Check cancelled');
+        }
+
+        const objectModel = await cocoSsd.load();
+
+        return { faceModel, objectModel };
+      })();
+
+      await Promise.race([modelsPromise, timeoutPromise]);
 
       return {
         status: 'pass',
         message: 'AI models loaded successfully'
       };
     } catch (error) {
+      let message = 'AI models failed to load';
+
+      if (error.message.includes('timeout')) {
+        message = 'AI models loading timeout';
+      } else if (error.message.includes('cancelled')) {
+        message = 'AI models check cancelled';
+      } else if (error.message.includes('network')) {
+        message = 'Network error loading AI models';
+      } else {
+        message = `AI models error: ${error.message}`;
+      }
+
       return {
         status: 'fail',
-        message: `AI models failed to load: ${error.message}`
+        message: message
       };
     }
   };
 
   const checkPerformance = async () => {
     try {
+      if (abortController.current.signal.aborted) {
+        throw new Error('Check cancelled');
+      }
+
       const start = performance.now();
 
-      // Simulate some processing
-      for (let i = 0; i < 1000000; i++) {
-        Math.random();
-      }
+      // Non-blocking performance test using requestAnimationFrame
+      await new Promise(resolve => {
+        let iterations = 0;
+        const maxIterations = 100000;
+
+        const performWork = () => {
+          const batchStart = performance.now();
+
+          // Do work in small batches to avoid blocking
+          while (iterations < maxIterations && performance.now() - batchStart < 5) {
+            Math.random();
+            iterations++;
+          }
+
+          if (iterations < maxIterations && !abortController.current.signal.aborted) {
+            requestAnimationFrame(performWork);
+          } else {
+            resolve();
+          }
+        };
+
+        performWork();
+      });
 
       const duration = performance.now() - start;
       const memory = performance.memory ? performance.memory.usedJSHeapSize / (1024 * 1024) : 0;
+      const cores = navigator.hardwareConcurrency || 'unknown';
 
       let status = 'pass';
       let message = 'System performance good';
 
-      if (duration > 100) {
+      if (duration > 200) {
         status = 'warning';
         message = 'System performance slow';
       }
@@ -231,9 +436,16 @@ const SystemCheck = () => {
 
       return {
         status,
-        message: `${message} (${duration.toFixed(1)}ms, ${memory.toFixed(1)}MB)`
+        message: `${message} (${duration.toFixed(1)}ms, ${memory.toFixed(1)}MB, ${cores} cores)`
       };
     } catch (error) {
+      if (error.message.includes('cancelled')) {
+        return {
+          status: 'warning',
+          message: 'Performance check cancelled'
+        };
+      }
+
       return {
         status: 'warning',
         message: 'Performance check inconclusive'
@@ -281,10 +493,33 @@ const SystemCheck = () => {
   };
 
   const handleProceed = () => {
-    if (videoStream) {
-      videoStream.getTracks().forEach(track => track.stop());
-    }
+    cleanup();
     navigate('/precheck');
+  };
+
+  const handleRetry = () => {
+    cleanup();
+    // Reset state
+    setError(null);
+    setShowVideo(false);
+    setOverallStatus('running');
+    setIsCheckCancelled(false);
+
+    // Reset checks to initial state
+    setChecks({
+      browser: { status: 'checking', message: 'Checking browser compatibility...' },
+      camera: { status: 'checking', message: 'Testing camera access...' },
+      microphone: { status: 'checking', message: 'Testing microphone access...' },
+      webgl: { status: 'checking', message: 'Checking WebGL support...' },
+      tensorflow: { status: 'checking', message: 'Loading TensorFlow.js...' },
+      models: { status: 'checking', message: 'Loading AI models...' },
+      performance: { status: 'checking', message: 'Checking system performance...' }
+    });
+
+    // Start new check
+    setTimeout(() => {
+      runSystemChecks();
+    }, 100);
   };
 
   const overallStatusInfo = getOverallStatusMessage();
@@ -364,11 +599,20 @@ const SystemCheck = () => {
           </div>
         )}
 
+        {/* Error Display */}
+        {error && (
+          <div style={styles.errorContainer}>
+            <div style={styles.errorMessage}>
+              <strong>Error:</strong> {error}
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         <div style={styles.actions}>
           <button
             style={styles.retryButton}
-            onClick={runSystemChecks}
+            onClick={handleRetry}
             disabled={overallStatus === 'running'}
           >
             🔄 Run Checks Again
@@ -578,6 +822,17 @@ const styles = {
     padding: '16px',
     borderRadius: '8px',
     border: '1px solid #e9ecef'
+  },
+  errorContainer: {
+    background: '#f8d7da',
+    border: '1px solid #f5c6cb',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '20px'
+  },
+  errorMessage: {
+    color: '#721c24',
+    fontSize: '14px'
   }
 };
 

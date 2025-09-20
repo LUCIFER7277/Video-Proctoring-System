@@ -16,6 +16,13 @@ class AIDetectionService {
     this.detectionActive = false;
     this.detectionInterval = null;
 
+    // Resource tracking for cleanup
+    this.intervals = new Set();
+    this.timeouts = new Set();
+    this.canvasContexts = new Set();
+    this.tensorBuffers = new Set();
+    this.detectionStartTime = null;
+
     // Detection settings - optimized for quality and performance
     this.settings = {
       faceDetectionThreshold: 0.7,
@@ -57,25 +64,60 @@ class AIDetectionService {
     try {
       console.log('🚀 Initializing AI Detection Service...');
 
-      // Setup TensorFlow backend
-      await tf.ready();
+      // Validate TensorFlow support
+      if (!tf) {
+        throw new Error('TensorFlow.js not available');
+      }
+
+      // Setup TensorFlow backend with timeout
+      const tfReadyPromise = tf.ready();
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('TensorFlow initialization timeout (30s)'));
+        }, 30000);
+        this.timeouts.add(timeoutId);
+      });
+
+      await Promise.race([tfReadyPromise, timeoutPromise]);
       console.log(`TensorFlow backend: ${tf.getBackend()}`);
 
-      // Load face detection model
+      // Load models with individual timeouts
       console.log('Loading face detection model...');
-      this.models.faceDetection = await blazeface.load();
+      const faceModelPromise = blazeface.load();
+      const faceTimeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Face detection model loading timeout (30s)'));
+        }, 30000);
+        this.timeouts.add(timeoutId);
+      });
+      this.models.faceDetection = await Promise.race([faceModelPromise, faceTimeoutPromise]);
       console.log('✅ Face detection model loaded');
 
       // Load face landmarks model
       console.log('Loading face landmarks model...');
-      this.models.faceLandmarks = await faceLandmarksDetection.load(
-        faceLandmarksDetection.SupportedPackages.mediapipeFacemesh
+      const landmarksModelPromise = faceLandmarksDetection.load(
+        faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+        { runtime: 'mediapipe', solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh' }
       );
+      const landmarksTimeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Face landmarks model loading timeout (30s)'));
+        }, 30000);
+        this.timeouts.add(timeoutId);
+      });
+      this.models.faceLandmarks = await Promise.race([landmarksModelPromise, landmarksTimeoutPromise]);
       console.log('✅ Face landmarks model loaded');
 
       // Load object detection model
       console.log('Loading object detection model...');
-      this.models.objectDetection = await cocoSsd.load();
+      const objectModelPromise = cocoSsd.load();
+      const objectTimeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Object detection model loading timeout (30s)'));
+        }, 30000);
+        this.timeouts.add(timeoutId);
+      });
+      this.models.objectDetection = await Promise.race([objectModelPromise, objectTimeoutPromise]);
       console.log('✅ Object detection model loaded');
 
       this.isInitialized = true;
@@ -106,13 +148,30 @@ class AIDetectionService {
       return null;
     }
 
+    // Validate video element state
+    if (videoElement.readyState < 2 || videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+      return null;
+    }
+
     try {
       const canvas = outputCanvas;
       const ctx = canvas.getContext('2d');
 
-      // Set canvas dimensions to match video
-      canvas.width = videoElement.videoWidth || 640;
-      canvas.height = videoElement.videoHeight || 480;
+      if (!ctx) {
+        throw new Error('Failed to get 2D context from canvas');
+      }
+
+      // Track context for cleanup
+      this.canvasContexts.add(ctx);
+
+      // Validate and set canvas dimensions
+      const videoWidth = Math.min(videoElement.videoWidth || 640, 1920);
+      const videoHeight = Math.min(videoElement.videoHeight || 480, 1080);
+
+      if (canvas.width !== videoWidth || canvas.height !== videoHeight) {
+        canvas.width = videoWidth;
+        canvas.height = videoHeight;
+      }
 
       // Clear canvas and draw video frame
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -134,6 +193,9 @@ class AIDetectionService {
 
       // Update statistics
       this.updateStatistics(faceResults, objectResults);
+
+      // Clean up any tensors that might have been created during processing
+      this.cleanupTensors();
 
       return {
         faces: faceResults,
@@ -248,13 +310,46 @@ class AIDetectionService {
 
   analyzeGaze(landmarks) {
     try {
-      // Simple gaze estimation based on eye and nose positions
-      // This is a basic implementation - in production you might want more sophisticated algorithms
+      // Validate landmarks array
+      if (!landmarks || !Array.isArray(landmarks) || landmarks.length < 4) {
+        return {
+          isLookingAway: false,
+          direction: 'unknown',
+          deviation: 0,
+          confidence: 0
+        };
+      }
+
+      // Validate landmark structure
+      const validateLandmark = (landmark) => {
+        return landmark && Array.isArray(landmark) && landmark.length >= 2 &&
+               typeof landmark[0] === 'number' && typeof landmark[1] === 'number';
+      };
+
+      // Ensure we have enough landmarks before accessing
+      if (landmarks.length < 4) {
+        return {
+          isLookingAway: false,
+          direction: 'unknown',
+          deviation: 0,
+          confidence: 0
+        };
+      }
 
       const leftEye = landmarks[0];
       const rightEye = landmarks[1];
       const nose = landmarks[2];
       const mouth = landmarks[3];
+
+      if (!validateLandmark(leftEye) || !validateLandmark(rightEye) ||
+          !validateLandmark(nose) || !validateLandmark(mouth)) {
+        return {
+          isLookingAway: false,
+          direction: 'unknown',
+          deviation: 0,
+          confidence: 0
+        };
+      }
 
       // Calculate eye center
       const eyeCenter = [
@@ -266,11 +361,24 @@ class AIDetectionService {
       const horizontalDeviation = Math.abs(nose[0] - eyeCenter[0]);
       const eyeDistance = Math.abs(rightEye[0] - leftEye[0]);
 
+      // Avoid division by zero
+      if (eyeDistance === 0) {
+        return {
+          isLookingAway: false,
+          direction: 'unknown',
+          deviation: 0,
+          confidence: 0
+        };
+      }
+
       // Normalize deviation
       const normalizedDeviation = horizontalDeviation / eyeDistance;
 
+      // Clamp values to reasonable ranges
+      const clampedDeviation = Math.min(Math.max(normalizedDeviation, 0), 2);
+
       // Determine if looking away
-      const isLookingAway = normalizedDeviation > this.settings.lookingAwayThreshold;
+      const isLookingAway = clampedDeviation > this.settings.lookingAwayThreshold;
 
       // Determine direction
       let direction = 'center';
@@ -281,8 +389,8 @@ class AIDetectionService {
       return {
         isLookingAway,
         direction,
-        deviation: normalizedDeviation,
-        confidence: 1 - normalizedDeviation
+        deviation: clampedDeviation,
+        confidence: Math.max(0, Math.min(1, 1 - clampedDeviation))
       };
 
     } catch (error) {
@@ -530,14 +638,51 @@ class AIDetectionService {
   updateStatistics(faceResults, objectResults) {
     const stats = this.state.detectionStats;
 
+    // Update average confidence with proper division protection
     if (faceResults.confidence > 0) {
-      stats.averageConfidence = (
-        (stats.averageConfidence * (stats.facesDetected - 1) + faceResults.confidence) /
-        stats.facesDetected
-      );
+      if (stats.facesDetected === 0) {
+        // First face detection
+        stats.averageConfidence = faceResults.confidence;
+      } else {
+        // Calculate running average with safe division
+        const newAverage = (
+          (stats.averageConfidence * stats.facesDetected + faceResults.confidence) /
+          (stats.facesDetected + 1)
+        );
+        stats.averageConfidence = isNaN(newAverage) ? 0 : Math.max(0, Math.min(1, newAverage));
+      }
     }
 
-    stats.violationsDetected += objectResults.violations.length;
+    // Safely update violation count
+    const violationCount = objectResults?.violations?.length || 0;
+    stats.violationsDetected += violationCount;
+  }
+
+  cleanupTensors() {
+    try {
+      // Get current memory info
+      const memInfo = tf.memory();
+
+      // If memory usage is getting high, force garbage collection
+      if (memInfo.numTensors > 100) {
+        tf.dispose();
+      }
+
+      // Clean up any tracked tensors
+      this.tensorBuffers.forEach(tensor => {
+        try {
+          if (tensor && typeof tensor.dispose === 'function' && !tensor.isDisposed) {
+            tensor.dispose();
+          }
+        } catch (error) {
+          console.warn('Error disposing tensor:', error);
+        }
+      });
+      this.tensorBuffers.clear();
+
+    } catch (error) {
+      console.warn('Error in tensor cleanup:', error);
+    }
   }
 
   startDetection(videoElement, outputCanvas, frameRate = null) {
@@ -550,15 +695,40 @@ class AIDetectionService {
       return;
     }
 
-    const fps = frameRate || this.settings.detectionFrameRate;
+    // Validate inputs
+    if (!videoElement || !outputCanvas) {
+      throw new Error('Invalid video element or canvas');
+    }
+
+    const fps = Math.max(1, Math.min(frameRate || this.settings.detectionFrameRate, 30));
     const interval = 1000 / fps;
 
     this.detectionActive = true;
-    this.detectionInterval = setInterval(async () => {
-      if (this.detectionActive) {
-        await this.processFrame(videoElement, outputCanvas);
+    this.detectionStartTime = Date.now();
+    let isProcessing = false;
+
+    const intervalId = setInterval(async () => {
+      if (this.detectionActive && !isProcessing) {
+        isProcessing = true;
+        try {
+          await this.processFrame(videoElement, outputCanvas);
+
+          // Periodic tensor cleanup to prevent memory buildup
+          if (this.state.detectionStats.totalFrames % 10 === 0) {
+            this.cleanupTensors();
+          }
+        } catch (error) {
+          console.error('Frame processing error:', error);
+          // Clean up on error to prevent memory leaks
+          this.cleanupTensors();
+        } finally {
+          isProcessing = false;
+        }
       }
     }, interval);
+
+    this.intervals.add(intervalId);
+    this.detectionInterval = intervalId;
 
     console.log(`Detection started at ${fps} FPS`);
     this.triggerEvent({
@@ -571,10 +741,12 @@ class AIDetectionService {
   stopDetection() {
     if (this.detectionInterval) {
       clearInterval(this.detectionInterval);
+      this.intervals.delete(this.detectionInterval);
       this.detectionInterval = null;
     }
 
     this.detectionActive = false;
+    this.detectionStartTime = null;
 
     console.log('Detection stopped');
     this.triggerEvent({
@@ -606,7 +778,7 @@ class AIDetectionService {
   getStatistics() {
     return {
       ...this.state.detectionStats,
-      uptime: this.detectionActive ? Date.now() - this.state.lastFaceDetection : 0,
+      uptime: this.detectionActive && this.detectionStartTime ? Date.now() - this.detectionStartTime : 0,
       violationRate: this.state.detectionStats.totalFrames > 0 ?
         this.state.detectionStats.violationsDetected / this.state.detectionStats.totalFrames : 0
     };
@@ -647,24 +819,103 @@ class AIDetectionService {
         averageConfidence: 0
       }
     };
+    this.detectionStartTime = null;
   }
 
   cleanup() {
-    this.stopDetection();
-    this.eventCallbacks = [];
+    try {
+      console.log('🧹 Starting AI Detection Service cleanup...');
 
-    // Dispose TensorFlow tensors to prevent memory leaks
-    if (this.models.faceDetection) {
-      this.models.faceDetection.dispose?.();
-    }
-    if (this.models.faceLandmarks) {
-      this.models.faceLandmarks.dispose?.();
-    }
-    if (this.models.objectDetection) {
-      this.models.objectDetection.dispose?.();
-    }
+      // Stop detection first
+      this.stopDetection();
 
-    console.log('AI Detection Service cleaned up');
+      // Clear all intervals
+      this.intervals.forEach(intervalId => {
+        clearInterval(intervalId);
+      });
+      this.intervals.clear();
+
+      // Clear all timeouts
+      this.timeouts.forEach(timeoutId => {
+        clearTimeout(timeoutId);
+      });
+      this.timeouts.clear();
+
+      // Clear canvas contexts
+      this.canvasContexts.clear();
+
+      // Dispose TensorFlow models and tensors
+      if (this.models.faceDetection) {
+        try {
+          if (typeof this.models.faceDetection.dispose === 'function') {
+            this.models.faceDetection.dispose();
+          }
+        } catch (error) {
+          console.warn('Face detection model disposal error:', error);
+        }
+        this.models.faceDetection = null;
+      }
+
+      if (this.models.faceLandmarks) {
+        try {
+          if (typeof this.models.faceLandmarks.dispose === 'function') {
+            this.models.faceLandmarks.dispose();
+          }
+        } catch (error) {
+          console.warn('Face landmarks model disposal error:', error);
+        }
+        this.models.faceLandmarks = null;
+      }
+
+      if (this.models.objectDetection) {
+        try {
+          if (typeof this.models.objectDetection.dispose === 'function') {
+            this.models.objectDetection.dispose();
+          }
+        } catch (error) {
+          console.warn('Object detection model disposal error:', error);
+        }
+        this.models.objectDetection = null;
+      }
+
+      // Clear tensor buffers
+      this.tensorBuffers.forEach(tensor => {
+        try {
+          if (tensor && typeof tensor.dispose === 'function') {
+            tensor.dispose();
+          }
+        } catch (error) {
+          console.warn('Tensor disposal error:', error);
+        }
+      });
+      this.tensorBuffers.clear();
+
+      // Clear callbacks and reset state
+      this.eventCallbacks = [];
+      this.isInitialized = false;
+      this.detectionActive = false;
+      this.detectionStartTime = null;
+
+      // Reset state
+      this.state = {
+        lastFaceDetection: Date.now(),
+        lastLookingAwayStart: null,
+        currentFaceCount: 0,
+        isLookingAway: false,
+        currentViolations: [],
+        detectionStats: {
+          totalFrames: 0,
+          facesDetected: 0,
+          violationsDetected: 0,
+          averageConfidence: 0
+        }
+      };
+
+      console.log('✅ AI Detection Service cleaned up successfully');
+
+    } catch (error) {
+      console.error('AI Detection Service cleanup error:', error);
+    }
   }
 }
 

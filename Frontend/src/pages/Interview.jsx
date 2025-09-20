@@ -69,6 +69,11 @@ const Interview = () => {
       if (response.data.success) {
         setInterview(response.data.data.interview);
         setViolations(response.data.data.violations || []);
+
+        // Auto-start the interview if it's scheduled
+        if (response.data.data.interview.status === 'scheduled') {
+          await startInterviewSession();
+        }
       } else {
         setError('Interview session not found');
       }
@@ -80,15 +85,52 @@ const Interview = () => {
     }
   };
 
+  const startInterviewSession = async () => {
+    try {
+      const response = await axios.post(`/api/interviews/${sessionId}/start`);
+      if (response.data.success) {
+        console.log('Interview started successfully');
+        setInterview(prev => prev ? {...prev, status: 'in_progress'} : null);
+      }
+    } catch (error) {
+      console.error('Error starting interview:', error);
+      // Don't throw error - continue with interview even if backend call fails
+    }
+  };
+
   const initializeSocket = () => {
-    const newSocket = io(import.meta.env.VITE_SOCKET_URL);
-    setSocket(newSocket);
+    try {
+      const newSocket = io(import.meta.env.VITE_SOCKET_URL, {
+        timeout: 5000,
+        reconnection: true,
+        reconnectionAttempts: 3,
+        reconnectionDelay: 1000
+      });
+      setSocket(newSocket);
 
-    newSocket.emit('join-interview', sessionId);
+      newSocket.on('connect', () => {
+        console.log('Socket connected successfully');
+        newSocket.emit('join-interview', sessionId);
+      });
 
-    return () => {
-      newSocket.close();
-    };
+      newSocket.on('connect_error', (error) => {
+        console.warn('Socket connection error (continuing without real-time features):', error.message);
+      });
+
+      newSocket.on('disconnect', () => {
+        console.warn('Socket disconnected');
+      });
+
+      newSocket.on('interviewer-message', (data) => {
+        console.log('Message from interviewer:', data);
+      });
+
+      return () => {
+        newSocket.close();
+      };
+    } catch (error) {
+      console.warn('Socket initialization failed, continuing without real-time features:', error);
+    }
   };
 
   const initializeDetection = async () => {
@@ -236,13 +278,19 @@ const Interview = () => {
     }
   }, [sessionId, socket]);
 
-  const startRecording = useCallback(() => {
+  const startRecording = useCallback(async () => {
     if (!webcamRef.current?.stream) {
       setError('Camera not available');
       return;
     }
 
     try {
+      // Start the interview session in the backend
+      const startResponse = await axios.post(`/api/interviews/${sessionId}/start`);
+      if (!startResponse.data.success) {
+        throw new Error('Failed to start interview session');
+      }
+
       recordedChunksRef.current = [];
 
       const mediaRecorder = new MediaRecorder(webcamRef.current.stream, {
@@ -266,9 +314,9 @@ const Interview = () => {
 
     } catch (error) {
       console.error('Error starting recording:', error);
-      setError('Failed to start recording');
+      setError('Failed to start recording and interview session');
     }
-  }, []);
+  }, [sessionId]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -565,7 +613,14 @@ const Interview = () => {
     return (
       <div style={styles.container}>
         <div style={styles.loading}>
-          Loading interview session...
+          <div style={{ fontSize: '24px', marginBottom: '16px' }}>⏳</div>
+          <div style={{ fontSize: '18px', marginBottom: '8px' }}>Loading Interview Session</div>
+          <div style={{ fontSize: '14px', color: '#6c757d' }}>
+            Session ID: {sessionId}
+          </div>
+          <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '16px' }}>
+            Initializing camera, AI detection, and connecting to servers...
+          </div>
         </div>
       </div>
     );
@@ -575,7 +630,32 @@ const Interview = () => {
     <div style={styles.container}>
       {error && (
         <div style={styles.error}>
-          {error}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            <span style={{ fontSize: '20px' }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>System Error</div>
+              <div>{error}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setError('');
+              setLoading(true);
+              initializeInterview();
+              initializeDetection();
+            }}
+            style={{
+              background: '#007bff',
+              color: 'white',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            🔄 Retry Initialization
+          </button>
         </div>
       )}
 
@@ -601,6 +681,15 @@ const Interview = () => {
           {interview && (
             <div style={{ ...styles.status, backgroundColor: '#3498db' }}>
               Score: {interview.integrityScore}/100
+            </div>
+          )}
+          {interview?.status && (
+            <div style={{
+              ...styles.status,
+              backgroundColor: interview.status === 'in_progress' ? '#27ae60' : '#95a5a6',
+              textTransform: 'capitalize'
+            }}>
+              {interview.status.replace('_', ' ')}
             </div>
           )}
         </div>
@@ -747,6 +836,45 @@ const Interview = () => {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* System Status Overview */}
+          <div style={{
+            padding: '15px',
+            borderRadius: '8px',
+            marginTop: '15px',
+            backgroundColor: '#f8f9fa',
+            border: '1px solid #e9ecef'
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '10px', fontSize: '14px' }}>
+              📊 System Status
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{interview ? '✅' : '⏳'}</span>
+                <span>Interview Data</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{socket ? '✅' : '❌'}</span>
+                <span>Real-time Connection</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{cameraReady ? '✅' : '❌'}</span>
+                <span>Camera Stream</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{detectionActive ? '✅' : '❌'}</span>
+                <span>AI Detection</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{isRecording ? '🔴' : '⚪'}</span>
+                <span>Recording Status</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{violations.length === 0 ? '✅' : '⚠️'}</span>
+                <span>Violations: {violations.length}</span>
+              </div>
+            </div>
           </div>
         </div>
 

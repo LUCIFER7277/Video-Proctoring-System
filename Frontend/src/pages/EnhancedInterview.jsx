@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -167,13 +168,37 @@ const EnhancedInterview = () => {
     }
   };
 
+  const startInterviewSession = async () => {
+    try {
+      const response = await axios.post(`/api/interviews/${sessionId}/start`);
+      if (response.data.success) {
+        console.log('Interview started successfully');
+        setInterview(prev => prev ? {...prev, status: 'in_progress'} : null);
+
+        eventLoggingService.logSystemEvent({
+          type: 'interview_started',
+          message: 'Interview session started successfully',
+          severity: 'info'
+        });
+      }
+    } catch (error) {
+      console.error('Error starting interview:', error);
+      eventLoggingService.logSystemEvent({
+        type: 'interview_start_error',
+        message: 'Failed to start interview session',
+        severity: 'warning',
+        data: { error: error.message }
+      });
+    }
+  };
+
   const loadInterviewData = async () => {
     try {
       // For development/demo, create mock interview data if backend is not available
       console.log('Loading interview data for session:', sessionId);
 
       try {
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/interviews/${sessionId}`, {
+        const response = await axios.get(`/api/interviews/${sessionId}`, {
           timeout: 5000
         });
 
@@ -181,26 +206,17 @@ const EnhancedInterview = () => {
           setInterview(response.data.data.interview);
           setViolations(response.data.data.violations || []);
           console.log('Interview data loaded from backend');
+
+          // Start the interview if it's scheduled
+          if (response.data.data.interview.status === 'scheduled') {
+            await startInterviewSession();
+          }
         } else {
           throw new Error('Interview session not found');
         }
       } catch (networkError) {
-        console.warn('Backend not available, using mock data:', networkError.message);
-
-        // Create mock interview data for demo purposes
-        const mockInterview = {
-          id: sessionId,
-          candidateName: 'Demo Candidate',
-          candidateEmail: 'demo@example.com',
-          interviewerName: 'Demo Interviewer',
-          startTime: new Date().toISOString(),
-          status: 'in_progress',
-          integrityScore: 100
-        };
-
-        setInterview(mockInterview);
-        setViolations([]);
-        console.log('Using mock interview data for demo');
+        console.error('Failed to load interview data:', networkError.message);
+        throw new Error(`Interview session not found: ${networkError.message}`);
       }
     } catch (error) {
       console.error('Error loading interview:', error);
@@ -691,11 +707,10 @@ const EnhancedInterview = () => {
       eventLoggingService.endSession();
 
       // Send final data to backend
-      await axios.post(`/api/interviews/${sessionId}/end`, {
-        eventSummary,
-        violationReport,
-        finalStats: serviceStats
-      });
+      await axios.post(`/api/interviews/${sessionId}/end`);
+
+      // Generate interview report
+      await axios.get(`/api/interviews/${sessionId}/report`);
 
       // Navigate to report
       navigate(`/report/${sessionId}`);
@@ -918,6 +933,9 @@ const EnhancedInterview = () => {
           <div style={{ fontSize: '14px', marginTop: '10px' }}>
             Loading AI models and detection services
           </div>
+          <div style={{ fontSize: '12px', marginTop: '20px', color: 'rgba(255,255,255,0.7)' }}>
+            Session ID: {sessionId}
+          </div>
         </div>
       </div>
     );
@@ -927,7 +945,31 @@ const EnhancedInterview = () => {
     <div style={styles.container}>
       {error && (
         <div style={styles.error}>
-          ⚠️ {error}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+            <span style={{ fontSize: '24px' }}>⚠️</span>
+            <div>
+              <div style={{ fontSize: '18px', fontWeight: 'bold' }}>System Error</div>
+              <div style={{ fontSize: '14px', opacity: 0.9 }}>{error}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setError('');
+              setLoading(true);
+              initializeSession();
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.3)',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            🔄 Retry Initialization
+          </button>
         </div>
       )}
 
@@ -951,6 +993,15 @@ const EnhancedInterview = () => {
           {interview && (
             <div style={{ ...styles.status, backgroundColor: '#3498db' }}>
               📊 Score: {interview.integrityScore || 100}/100
+            </div>
+          )}
+          {interview?.status && (
+            <div style={{
+              ...styles.status,
+              backgroundColor: interview.status === 'in_progress' ? '#27ae60' : '#95a5a6',
+              textTransform: 'capitalize'
+            }}>
+              🎯 {interview.status.replace('_', ' ')}
             </div>
           )}
         </div>

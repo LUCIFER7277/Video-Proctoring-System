@@ -13,7 +13,7 @@ const ReportView = () => {
   const [reportUrl, setReportUrl] = useState('');
   const [generating, setGenerating] = useState(false);
 
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+  const API_BASE_URL = '/api';
 
   useEffect(() => {
     loadReportData();
@@ -23,14 +23,22 @@ const ReportView = () => {
     try {
       setLoading(true);
 
+      // Validate session ID format
+      if (!sessionId || sessionId.length < 10) {
+        setError('Invalid session ID format. Please check the URL.');
+        return;
+      }
+
       // Get interview data
       const interviewResponse = await axios.get(`${API_BASE_URL}/interviews/${sessionId}`);
 
       if (interviewResponse.data.success) {
-        setInterview(interviewResponse.data.interview);
+        // Fix response structure - backend returns nested data
+        const interviewData = interviewResponse.data.data?.interview || interviewResponse.data.interview;
+        setInterview(interviewData);
 
         // Get violation summary
-        const violationsResponse = await axios.get(`${API_BASE_URL}/violations/summary/${interviewResponse.data.interview._id}`);
+        const violationsResponse = await axios.get(`${API_BASE_URL}/violations/session/${sessionId}/summary`);
 
         if (violationsResponse.data.success) {
           setViolationSummary(violationsResponse.data);
@@ -41,7 +49,17 @@ const ReportView = () => {
 
     } catch (error) {
       console.error('Error loading report data:', error);
-      setError('Failed to load report data. Please check if the session exists.');
+
+      // Provide more specific error messages
+      if (error.response?.status === 404) {
+        setError('Interview session not found. Please check if the session ID is correct.');
+      } else if (error.response?.status === 400) {
+        setError('Invalid session ID format. Please check the URL.');
+      } else if (error.message.includes('Network Error')) {
+        setError('Connection failed. Please check your internet connection and try again.');
+      } else {
+        setError('Failed to load report data. Please check if the session exists and try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -58,23 +76,77 @@ const ReportView = () => {
       if (response.data.success) {
         setReportUrl(response.data.downloadUrl);
 
-        // Auto-download the report
-        window.open(`${API_BASE_URL}${response.data.downloadUrl}`, '_blank');
+        // Auto-download the report using proper blob download
+        if (response.data.filename) {
+          await downloadReportFile(response.data.filename);
+        }
       } else {
         setError('Failed to generate report: ' + response.data.message);
       }
 
     } catch (error) {
       console.error('Error generating report:', error);
-      setError('Failed to generate report');
+
+      // Provide more specific error messages for report generation
+      if (error.response?.status === 404) {
+        setError('Interview not found. Cannot generate report for non-existent interview.');
+      } else if (error.response?.status === 500) {
+        setError('Server error while generating report. Please try again later.');
+      } else if (error.message.includes('Network Error')) {
+        setError('Connection failed while generating report. Please check your internet connection.');
+      } else {
+        setError('Failed to generate report. Please try again.');
+      }
     } finally {
       setGenerating(false);
     }
   };
 
-  const downloadReport = () => {
-    if (reportUrl) {
-      window.open(`${API_BASE_URL}${reportUrl}`, '_blank');
+  const downloadReportFile = async (filename) => {
+    try {
+      // Create a proper download request
+      const response = await fetch(`${API_BASE_URL}/reports/download/${filename}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/pdf',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download report');
+      }
+
+      // Create blob from response
+      const blob = await response.blob();
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+
+      // Cleanup
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+
+    } catch (error) {
+      console.error('Error downloading report:', error);
+      setError('Failed to download report');
+    }
+  };
+
+  const downloadReport = async () => {
+    if (!reportUrl) return;
+
+    try {
+      // Extract filename from reportUrl (e.g., /api/reports/download/filename.pdf)
+      const filename = reportUrl.split('/').pop();
+      await downloadReportFile(filename);
+    } catch (error) {
+      console.error('Error downloading report:', error);
+      setError('Failed to download report');
     }
   };
 
