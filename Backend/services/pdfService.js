@@ -23,8 +23,10 @@ class PDFService {
         doc.fontSize(12)
            .fillColor('#666')
            .font('Helvetica')
-           .text(`Generated on: ${new Date().toLocaleDateString()}`, 50, 90)
-           .text(`Session ID: ${interview.sessionId}`, 50, 110);
+           .text(`Generated on: ${new Date().toLocaleDateString()}`, 50, 90);
+
+        // Session ID on separate line with proper formatting
+        doc.text(`Session ID: ${interview.sessionId || 'N/A'}`, 50, 110);
 
         // Candidate Information
         doc.fontSize(18)
@@ -33,24 +35,30 @@ class PDFService {
            .text('CANDIDATE INFORMATION', 50, 150);
 
         let candidateY = 180;
+
+        // Candidate Name
         doc.fontSize(14)
            .fillColor('#000')
            .font('Helvetica')
-           .text('Candidate Name:', 50, candidateY)
-           .font('Helvetica-Bold')
-           .text(interview.candidateName, 150, candidateY);
+           .text('Candidate Name:', 50, candidateY);
+        doc.font('Helvetica-Bold')
+           .text(interview.candidateName || 'Unknown', 180, candidateY);
 
         candidateY += 25;
+
+        // Email
         doc.font('Helvetica')
-           .text('Email:', 50, candidateY)
-           .font('Helvetica-Bold')
-           .text(interview.candidateEmail, 150, candidateY);
+           .text('Candidate Email:', 50, candidateY);
+        doc.font('Helvetica-Bold')
+           .text(interview.candidateEmail || 'N/A', 180, candidateY);
 
         candidateY += 25;
+
+        // Interviewer
         doc.font('Helvetica')
-           .text('Interviewer:', 50, candidateY)
-           .font('Helvetica-Bold')
-           .text(interview.interviewerName, 150, candidateY);
+           .text('Interviewer:', 50, candidateY);
+        doc.font('Helvetica-Bold')
+           .text(interview.interviewerName || 'Unknown', 180, candidateY);
 
         // Interview Summary
         doc.fontSize(18)
@@ -66,33 +74,44 @@ class PDFService {
           : 0;
         const durationText = `${duration} minutes`;
 
+        // Duration
         doc.fontSize(14)
            .font('Helvetica-Bold')
            .fillColor('#1a365d')
-           .text('Interview Duration:', 50, summaryY)
+           .text('Interview Duration:', 50, summaryY);
+        doc.fillColor('#000')
+           .font('Helvetica')
            .text(durationText, 200, summaryY);
 
         summaryY += 30;
-        doc.text('Start Time:', 50, summaryY)
-           .fillColor('#000')
+
+        // Start Time
+        doc.fillColor('#1a365d')
+           .font('Helvetica-Bold')
+           .text('Start Time:', 50, summaryY);
+        doc.fillColor('#000')
            .font('Helvetica')
            .text(interview.startTime ? new Date(interview.startTime).toLocaleString() : 'N/A', 200, summaryY);
 
         summaryY += 25;
+
+        // End Time
         doc.fillColor('#1a365d')
            .font('Helvetica-Bold')
-           .text('End Time:', 50, summaryY)
-           .fillColor('#000')
+           .text('End Time:', 50, summaryY);
+        doc.fillColor('#000')
            .font('Helvetica')
            .text(interview.endTime ? new Date(interview.endTime).toLocaleString() : 'N/A', 200, summaryY);
 
         summaryY += 25;
+
+        // Status
         doc.fillColor('#1a365d')
            .font('Helvetica-Bold')
-           .text('Status:', 50, summaryY)
-           .fillColor('#000')
+           .text('Status:', 50, summaryY);
+        doc.fillColor('#000')
            .font('Helvetica')
-           .text(interview.status || 'completed', 200, summaryY);
+           .text((interview.status || 'completed').toUpperCase(), 200, summaryY);
 
         // Focus Lost Count (as specifically requested)
         summaryY += 40;

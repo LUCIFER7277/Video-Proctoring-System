@@ -95,24 +95,27 @@ class ReportGenerator {
     const startY = currentY + 30;
     let y = startY;
 
-    // Interview details
+    // Interview details with proper validation
     const details = [
-      ['Session ID:', interview.sessionId],
-      ['Candidate Name:', interview.candidateName],
-      ['Candidate Email:', interview.candidateEmail],
-      ['Interviewer:', interview.interviewerName],
-      ['Start Time:', new Date(interview.startTime).toLocaleString()],
+      ['Session ID:', interview.sessionId || 'N/A'],
+      ['Candidate Name:', interview.candidateName || 'Unknown'],
+      ['Candidate Email:', interview.candidateEmail || 'N/A'],
+      ['Interviewer:', interview.interviewerName || 'Unknown'],
+      ['Start Time:', interview.startTime ? new Date(interview.startTime).toLocaleString() : 'N/A'],
       ['End Time:', interview.endTime ? new Date(interview.endTime).toLocaleString() : 'In Progress'],
       ['Duration:', interview.duration ? `${interview.duration} minutes` : 'N/A'],
-      ['Status:', interview.status.toUpperCase()],
-      ['Integrity Score:', `${interview.integrityScore}/100`],
-      ['Total Violations:', interview.violationCount],
-      ['Focus Lost Count:', interview.focusLostCount]
+      ['Status:', (interview.status || 'unknown').toUpperCase()],
+      ['Integrity Score:', `${interview.integrityScore || 0}/100`],
+      ['Total Violations:', interview.violationCount || 0],
+      ['Focus Lost Count:', interview.focusLostCount || 0]
     ];
 
     details.forEach(([label, value]) => {
-      doc.text(label, 50, y, { width: 150, continued: true })
-         .text(value, 200, y);
+      // Ensure value is properly formatted and not undefined
+      const displayValue = value !== undefined && value !== null ? value.toString() : 'N/A';
+
+      doc.text(label, 50, y, { continued: false })
+         .text(displayValue, 200, y, { continued: false });
       y += 20;
     });
 
