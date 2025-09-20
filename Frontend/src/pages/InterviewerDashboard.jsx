@@ -121,7 +121,7 @@ const InterviewerDashboard = () => {
   // Initialize WebRTC service when socket is connected
   useEffect(() => {
     if (socket && socket.connected && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
-      initializeWebRTCService().catch(error => {
+      initializeWebRTCService(socket).catch(error => {
         console.error('Failed to initialize WebRTC service:', error);
       });
     }
@@ -187,7 +187,7 @@ const InterviewerDashboard = () => {
 
       // Initialize WebRTC service after socket is connected
       if (webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
-        initializeWebRTCService().catch(error => {
+        initializeWebRTCService(socket).catch(error => {
           console.error('Failed to initialize WebRTC service after socket connection:', error);
         });
       } else if (webrtcServiceRef.current && webrtcServiceRef.current.isInitialized && !hasJoinedRoomRef.current) {
@@ -307,9 +307,10 @@ const InterviewerDashboard = () => {
     }
   };
 
-  const initializeWebRTCService = async () => {
+  const initializeWebRTCService = async (socketInstance = socket) => {
     try {
       console.log('🚀 Initializing Professional WebRTC Service for Interviewer...');
+      console.log('Socket instance passed:', socketInstance ? 'valid' : 'null');
 
       const service = webrtcServiceRef.current;
 
@@ -346,7 +347,7 @@ const InterviewerDashboard = () => {
       };
 
       // Initialize the service
-      await service.initialize(socket);
+      await service.initialize(socketInstance);
 
       // Get local stream and set it to video element
       const stream = service.localStream;
@@ -359,9 +360,9 @@ const InterviewerDashboard = () => {
       await service.createPeerConnection();
 
       // Join room now that service is ready
-      if (socket.connected && !hasJoinedRoomRef.current) {
+      if (socketInstance.connected && !hasJoinedRoomRef.current) {
         console.log('Socket connected, joining room now...');
-        socket.emit('join-room', { sessionId, role: 'interviewer' });
+        socketInstance.emit('join-room', { sessionId, role: 'interviewer' });
         hasJoinedRoomRef.current = true;
       }
 

@@ -99,7 +99,12 @@ class ProfessionalWebRTCService {
       }
 
       if (!socket) {
+        console.error('❌ Socket is null or undefined');
         throw new Error('Socket connection is required');
+      }
+
+      if (!socket.connected) {
+        console.warn('⚠️ Socket is not connected yet, but proceeding with initialization');
       }
 
       this.socket = socket;
@@ -340,6 +345,7 @@ class ProfessionalWebRTCService {
           this.socket.emit('ice-candidate', event.candidate);
         } else {
           console.warn('⚠️ Socket not connected, buffering ICE candidate');
+          console.log('Socket state:', this.socket ? `connected: ${this.socket.connected}` : 'null');
           // Buffer candidate for later transmission
           this.bufferIceCandidate(event.candidate);
         }

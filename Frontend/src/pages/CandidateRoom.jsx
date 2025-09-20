@@ -180,7 +180,7 @@ const CandidateRoom = () => {
   // Initialize WebRTC service when socket is connected
   useEffect(() => {
     if (socket && socket.connected && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
-      initializeWebRTCService().catch(error => {
+      initializeWebRTCService(socket).catch(error => {
         console.error('Failed to initialize WebRTC service:', error);
         addNotification('Failed to initialize video connection', 'error');
       });
@@ -277,7 +277,7 @@ const CandidateRoom = () => {
       
       // Initialize WebRTC service after socket is connected
       if (webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
-        initializeWebRTCService().catch(error => {
+        initializeWebRTCService(socket).catch(error => {
           console.error('Failed to initialize WebRTC service after socket connection:', error);
           addNotification('Failed to initialize video connection', 'error');
         });
@@ -448,9 +448,10 @@ const CandidateRoom = () => {
     }
   };
 
-  const initializeWebRTCService = async () => {
+  const initializeWebRTCService = async (socketInstance = socket) => {
     try {
       console.log('🚀 Initializing Professional WebRTC Service for Candidate...');
+      console.log('Socket instance passed:', socketInstance ? 'valid' : 'null');
 
       const service = webrtcServiceRef.current;
 
@@ -487,7 +488,7 @@ const CandidateRoom = () => {
       };
 
       // Initialize the service
-      await service.initialize(socket);
+      await service.initialize(socketInstance);
 
       // Get local stream and set it to video element
       const stream = service.localStream;
@@ -502,7 +503,7 @@ const CandidateRoom = () => {
       // Signal that candidate is ready
       setTimeout(() => {
         console.log('Candidate: Signaling ready for WebRTC...');
-        socket.emit('candidate-ready', { sessionId });
+        socketInstance.emit('candidate-ready', { sessionId });
       }, 1000);
 
       console.log('✅ WebRTC service initialized successfully');
