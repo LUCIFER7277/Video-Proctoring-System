@@ -57,16 +57,19 @@ const Login = () => {
           interviewerName: formData.name
         };
 
-        const response = await axios.post(
-          `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews`,
-          interviewData
-        );
+        const apiUrl = `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews`;
+        console.log('Creating interview with API URL:', apiUrl);
+        console.log('Interview data:', interviewData);
+        
+        const response = await axios.post(apiUrl, interviewData);
+        console.log('Interview creation response:', response.data);
 
         if (response.data.success) {
           sessionId = response.data.sessionId;
           console.log('Created interview session:', sessionId);
           setSuccess(`Interview session created! Session ID: ${sessionId}`);
         } else {
+          console.error('Failed to create interview session:', response.data);
           throw new Error('Failed to create interview session');
         }
       } else {

@@ -140,7 +140,7 @@ const CandidateRoom = () => {
   const loadInterviewData = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`/api/interviews/${sessionId}`);
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}`);
 
       if (response.data.success) {
         setInterview(response.data.data.interview);
@@ -165,7 +165,7 @@ const CandidateRoom = () => {
 
   const startInterview = async () => {
     try {
-      const response = await axios.post(`/api/interviews/${sessionId}/start`);
+      const response = await axios.post(`${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}/start`);
       if (response.data.success) {
         console.log('Interview started successfully');
         setInterview(prev => prev ? {...prev, status: 'in_progress'} : null);

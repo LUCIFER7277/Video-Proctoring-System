@@ -36,6 +36,7 @@ const InterviewerDashboard = () => {
   const [recordingStatus, setRecordingStatus] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
 
   // System status
   const [systemStatus, setSystemStatus] = useState({
@@ -101,21 +102,48 @@ const InterviewerDashboard = () => {
   const loadInterviewData = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`/api/interviews/${sessionId}`);
+      console.log('Loading interview data for sessionId:', sessionId);
+      
+      const apiUrl = `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}`;
+      console.log('API URL:', apiUrl);
+      
+      const response = await axios.get(apiUrl);
+      console.log('Interview data response:', response.data);
 
       if (response.data.success) {
         setInterview(response.data.data.interview);
         setViolations(response.data.data.violations || []);
         setError('');
+        console.log('Interview data loaded successfully');
       } else {
+        console.error('Interview not found in response:', response.data);
         setError('Interview session not found');
       }
     } catch (error) {
       console.error('Error loading interview data:', error);
-      setError('Failed to load interview data');
+      console.error('Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      if (error.response?.status === 404) {
+        setError('Interview session not found');
+      } else if (error.response?.status === 500) {
+        setError('Server error. Please try again.');
+      } else {
+        setError('Failed to load interview data. Please check your connection.');
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const retryLoadInterview = () => {
+    console.log('Retrying interview data load...');
+    setRetryCount(prev => prev + 1);
+    setError('');
+    loadInterviewData();
   };
 
   // Initialize WebRTC service when socket is connected
@@ -1171,19 +1199,34 @@ const InterviewerDashboard = () => {
         }}>
           <div style={{ fontSize: '24px', color: '#ef4444' }}>⚠️</div>
           <div style={{ color: '#ef4444' }}>{error}</div>
-          <button
-            onClick={() => window.location.reload()}
-            style={{
-              padding: '12px 24px',
-              background: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer'
-            }}
-          >
-            Retry
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              onClick={retryLoadInterview}
+              style={{
+                padding: '12px 24px',
+                background: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                padding: '12px 24px',
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Reload Page
+            </button>
+          </div>
         </div>
       </div>
     );
