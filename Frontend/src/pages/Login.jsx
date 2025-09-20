@@ -58,7 +58,7 @@ const Login = () => {
         };
 
         const response = await axios.post(
-          '/api/interviews',
+          `${import.meta.env.VITE_API_URL}/api/interviews`,
           interviewData
         );
 
