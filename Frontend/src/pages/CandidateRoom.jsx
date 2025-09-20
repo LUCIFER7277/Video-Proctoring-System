@@ -177,9 +177,9 @@ const CandidateRoom = () => {
     }
   };
 
-  // Initialize WebRTC service when socket is available
+  // Initialize WebRTC service when socket is connected
   useEffect(() => {
-    if (socket && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
+    if (socket && socket.connected && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
       initializeWebRTCService().catch(error => {
         console.error('Failed to initialize WebRTC service:', error);
         addNotification('Failed to initialize video connection', 'error');
@@ -259,10 +259,9 @@ const CandidateRoom = () => {
       // Get user media with device-aware constraints
       await initializeLocalStream();
 
-      setConnectionStatus('connected');
-      setIsConnected(true);
-      setSessionStartTime(new Date());
-      addNotification('Connection established successfully', 'success');
+      setConnectionStatus('connecting');
+      // Note: WebRTC initialization will happen in socket 'connect' event
+      // Connection status will be updated to 'connected' after WebRTC is ready
 
     } catch (error) {
       console.error('Connection initialization failed:', error);
@@ -275,6 +274,14 @@ const CandidateRoom = () => {
     socket.on('connect', () => {
       console.log('Socket connected');
       socket.emit('join-room', { sessionId, role: 'candidate' });
+      
+      // Initialize WebRTC service after socket is connected
+      if (webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
+        initializeWebRTCService().catch(error => {
+          console.error('Failed to initialize WebRTC service after socket connection:', error);
+          addNotification('Failed to initialize video connection', 'error');
+        });
+      }
     });
 
     socket.on('disconnect', () => {
@@ -499,8 +506,16 @@ const CandidateRoom = () => {
       }, 1000);
 
       console.log('✅ WebRTC service initialized successfully');
+      
+      // Update connection status after successful WebRTC initialization
+      setConnectionStatus('connected');
+      setIsConnected(true);
+      setSessionStartTime(new Date());
+      addNotification('Connection established successfully', 'success');
     } catch (error) {
       console.error('❌ Failed to initialize WebRTC service:', error);
+      setConnectionStatus('failed');
+      addNotification('Failed to initialize video connection', 'error');
       throw error;
     }
   };

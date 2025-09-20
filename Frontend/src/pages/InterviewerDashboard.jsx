@@ -118,9 +118,9 @@ const InterviewerDashboard = () => {
     }
   };
 
-  // Initialize WebRTC service when socket is available
+  // Initialize WebRTC service when socket is connected
   useEffect(() => {
-    if (socket && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
+    if (socket && socket.connected && webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
       initializeWebRTCService().catch(error => {
         console.error('Failed to initialize WebRTC service:', error);
       });
@@ -185,13 +185,15 @@ const InterviewerDashboard = () => {
     socket.on('connect', () => {
       console.log('Interviewer socket connected');
 
-      // Join room after WebRTC service is ready
-      if (webrtcServiceRef.current && webrtcServiceRef.current.isInitialized && !hasJoinedRoomRef.current) {
+      // Initialize WebRTC service after socket is connected
+      if (webrtcServiceRef.current && !webrtcServiceRef.current.isInitialized) {
+        initializeWebRTCService().catch(error => {
+          console.error('Failed to initialize WebRTC service after socket connection:', error);
+        });
+      } else if (webrtcServiceRef.current && webrtcServiceRef.current.isInitialized && !hasJoinedRoomRef.current) {
         console.log('WebRTC service ready, joining room...');
         socket.emit('join-room', { sessionId, role: 'interviewer' });
         hasJoinedRoomRef.current = true;
-      } else {
-        console.log('Waiting for WebRTC service before joining room...');
       }
     });
 

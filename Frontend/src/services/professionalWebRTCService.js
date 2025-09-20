@@ -336,6 +336,7 @@ class ProfessionalWebRTCService {
         });
 
         if (this.socket && this.socket.connected) {
+          console.log('📤 Sending ICE candidate immediately');
           this.socket.emit('ice-candidate', event.candidate);
         } else {
           console.warn('⚠️ Socket not connected, buffering ICE candidate');
@@ -411,6 +412,13 @@ class ProfessionalWebRTCService {
 
       this.bufferedCandidates.length = 0; // Clear buffer
     }
+  }
+
+  /**
+   * Check if socket is connected
+   */
+  isSocketConnected() {
+    return this.socket && this.socket.connected;
   }
 
   /**
@@ -778,8 +786,8 @@ class ProfessionalWebRTCService {
 
     // Return cached stats if called too frequently (unless forced)
     if (!forceRefresh &&
-        this.lastStatsReport &&
-        (now - this.lastStatsTime) < this.statsThrottleMs) {
+      this.lastStatsReport &&
+      (now - this.lastStatsTime) < this.statsThrottleMs) {
       return this.lastStatsReport;
     }
 
