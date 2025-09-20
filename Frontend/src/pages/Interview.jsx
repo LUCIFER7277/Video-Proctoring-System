@@ -96,44 +96,50 @@ const Interview = () => {
 
   const initializeDetection = async () => {
     try {
-      console.log("🚀 Starting AI detection initialization...");
+      console.log("🚀 Starting AI detection initialization on CANDIDATE side...");
       setError(""); // Clear any previous errors
 
       // Wait for video element to be ready
       if (!webcamRef.current?.video) {
-        console.log("⏳ Waiting for video element...");
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log("⏳ Waiting for candidate video element...");
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
 
       if (!webcamRef.current?.video) {
-        throw new Error("Video element not available for detection");
+        throw new Error("Candidate video element not available for detection");
       }
 
-      // Initialize focus detection
-      console.log("🔍 Initializing focus detection...");
+      console.log("📹 Candidate video element found:", {
+        videoWidth: webcamRef.current.video.videoWidth,
+        videoHeight: webcamRef.current.video.videoHeight,
+        readyState: webcamRef.current.video.readyState
+      });
+
+      // Initialize focus detection on candidate video
+      console.log("🔍 Initializing focus detection on candidate video...");
       await focusServiceRef.current.initialize(
         webcamRef.current.video,
         focusCanvasRef.current
       );
       focusServiceRef.current.addEventListener(handleFocusEvent);
 
-      // Initialize object detection
-      console.log("📱 Initializing object detection...");
+      // Initialize object detection on candidate video
+      console.log("📱 Initializing object detection on candidate video...");
       await objectServiceRef.current.initialize(
         webcamRef.current.video,
         objectCanvasRef.current
       );
       objectServiceRef.current.addEventListener(handleObjectEvent);
 
-      console.log("✅ AI detection successfully initialized");
+      console.log("✅ AI detection successfully initialized on CANDIDATE video");
       setDetectionActive(true);
 
       // Start detection loop
       startDetectionLoop();
-      console.log("🔄 Detection loop started");
+      console.log("🔄 Detection loop started on candidate video");
     } catch (error) {
-      console.error("❌ Detection initialization error:", error);
-      setError(`AI models failed to load: ${error.message}`);
+      console.error("❌ Detection initialization error on candidate video:", error);
+      setError(`AI models failed to load on candidate video: ${error.message}`);
     }
   };
 
@@ -234,34 +240,70 @@ const Interview = () => {
   const handleViolation = useCallback(
     async (violation) => {
       try {
-        console.log("🚨 Processing violation:", violation);
+        console.log("🚨 Processing violation on CANDIDATE side:", violation);
         
-        // Capture screenshot as evidence
+        // Capture screenshot as evidence from the candidate's video
         let screenshotBlob = null;
-        if (focusCanvasRef.current) {
-          const screenshot = focusCanvasRef.current.toDataURL("image/jpeg", 0.8);
+        if (webcamRef.current?.video && focusCanvasRef.current) {
+          // Create a canvas to capture the video frame with detection overlays
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = webcamRef.current.video.videoWidth || 640;
+          canvas.height = webcamRef.current.video.videoHeight || 480;
+          
+          // Draw the video frame
+          ctx.drawImage(webcamRef.current.video, 0, 0, canvas.width, canvas.height);
+          
+          // Draw detection overlays if available
+          if (focusCanvasRef.current) {
+            ctx.drawImage(focusCanvasRef.current, 0, 0, canvas.width, canvas.height);
+          }
+          if (objectCanvasRef.current) {
+            ctx.drawImage(objectCanvasRef.current, 0, 0, canvas.width, canvas.height);
+          }
+          
+          // Convert to blob
+          const screenshot = canvas.toDataURL("image/jpeg", 0.8);
           const response = await fetch(screenshot);
           screenshotBlob = await response.blob();
         }
 
+        // Prepare detailed violation data
+        const violationData = {
+          sessionId,
+          type: violation.type,
+          description: violation.description,
+          confidence: violation.confidence || 0.5,
+          timestamp: violation.timestamp.toISOString(),
+          severity: violation.severity || "medium",
+          source: "candidate_detection", // Mark as coming from candidate side
+          metadata: JSON.stringify({
+            ...violation.metadata,
+            detectionLocation: "candidate_side",
+            videoDimensions: {
+              width: webcamRef.current?.video?.videoWidth || 0,
+              height: webcamRef.current?.video?.videoHeight || 0
+            },
+            detectionTimestamp: new Date().toISOString(),
+            candidateInfo: interview?.candidateName || "Unknown"
+          })
+        };
+
         // Prepare form data
         const formData = new FormData();
-        formData.append("sessionId", sessionId);
-        formData.append("type", violation.type);
-        formData.append("description", violation.description);
-        formData.append("confidence", violation.confidence || 0.5);
-        formData.append("timestamp", violation.timestamp.toISOString());
-        formData.append("severity", violation.severity || "medium");
-        if (violation.metadata) {
-          formData.append("metadata", JSON.stringify(violation.metadata));
-        }
+        Object.entries(violationData).forEach(([key, value]) => {
+          formData.append(key, value);
+        });
+        
         if (screenshotBlob) {
           formData.append(
             "screenshot",
             screenshotBlob,
-            `violation-${Date.now()}.jpg`
+            `candidate-violation-${Date.now()}.jpg`
           );
         }
+
+        console.log("📤 Sending violation to backend:", violationData);
 
         // Send to backend
         const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/violations`, formData, {
@@ -271,17 +313,19 @@ const Interview = () => {
         });
 
         if (response.data.success) {
-          console.log("✅ Violation saved to backend");
+          console.log("✅ Violation saved to backend successfully");
           
           // Update local violations list
           setViolations((prev) => [...prev, response.data.data]);
 
           // Send real-time alert to interviewer
           if (socket) {
+            console.log("📡 Sending violation alert to interviewer");
             socket.emit("violation-detected", {
               sessionId,
               violation: response.data.data,
               timestamp: new Date(),
+              source: "candidate_detection"
             });
           }
 
@@ -292,18 +336,32 @@ const Interview = () => {
               integrityScore: response.data.integrityScore,
             }));
           }
+        } else {
+          console.error("❌ Backend returned error:", response.data);
         }
       } catch (error) {
         console.error("❌ Error handling violation:", error);
         // Still add to local state even if backend fails
-        setViolations((prev) => [...prev, {
+        const localViolation = {
           ...violation,
           id: Date.now(),
-          timestamp: violation.timestamp.toISOString()
-        }]);
+          timestamp: violation.timestamp.toISOString(),
+          source: "candidate_detection_local"
+        };
+        setViolations((prev) => [...prev, localViolation]);
+        
+        // Try to send to interviewer even if backend fails
+        if (socket) {
+          socket.emit("violation-detected", {
+            sessionId,
+            violation: localViolation,
+            timestamp: new Date(),
+            source: "candidate_detection_local"
+          });
+        }
       }
     },
-    [sessionId, socket]
+    [sessionId, socket, interview]
   );
 
   const startRecording = useCallback(() => {

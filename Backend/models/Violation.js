@@ -16,10 +16,13 @@ const violationSchema = new mongoose.Schema({
       'focus_lost',
       'no_face_detected',
       'multiple_faces',
+      'multiple_faces_detected',
       'phone_detected',
       'book_detected',
       'notes_detected',
       'device_detected',
+      'unauthorized_item',
+      'unauthorized_item_detected',
       'looking_away',
       'absence',
       'eye_closure',
@@ -60,6 +63,11 @@ const violationSchema = new mongoose.Schema({
   },
   metadata: {
     type: mongoose.Schema.Types.Mixed
+  },
+  source: {
+    type: String,
+    enum: ['candidate_detection', 'interviewer_detection', 'system_detection', 'manual', 'unknown'],
+    default: 'unknown'
   }
 }, {
   timestamps: true
@@ -70,7 +78,7 @@ violationSchema.index({ interviewId: 1, timestamp: 1 });
 violationSchema.index({ sessionId: 1, type: 1 });
 
 // Static method to get violation summary
-violationSchema.statics.getViolationSummary = async function(interviewId) {
+violationSchema.statics.getViolationSummary = async function (interviewId) {
   return await this.aggregate([
     { $match: { interviewId: new mongoose.Types.ObjectId(interviewId) } },
     {

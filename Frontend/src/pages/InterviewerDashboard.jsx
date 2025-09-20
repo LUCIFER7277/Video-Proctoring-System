@@ -417,16 +417,34 @@ const InterviewerDashboard = () => {
       detectionVideo.srcObject = candidateStream;
       detectionVideo.autoplay = true;
       detectionVideo.muted = true;
+      detectionVideo.playsInline = true;
 
+      // Wait for video to be ready
       await new Promise((resolve) => {
-        detectionVideo.onloadedmetadata = resolve;
+        detectionVideo.onloadedmetadata = () => {
+          console.log("Detection video metadata loaded");
+          resolve();
+        };
+        detectionVideo.onerror = (error) => {
+          console.error("Detection video error:", error);
+          resolve(); // Continue even if there's an error
+        };
       });
 
-      // Initialize detection services
+      // Set canvas dimensions to match video
+      if (detectionCanvasRef.current) {
+        detectionCanvasRef.current.width = detectionVideo.videoWidth || 640;
+        detectionCanvasRef.current.height = detectionVideo.videoHeight || 480;
+      }
+
+      // Initialize detection services with the candidate video
+      console.log("Initializing focus detection on candidate video...");
       await focusServiceRef.current.initialize(
         detectionVideo,
         detectionCanvasRef.current
       );
+      
+      console.log("Initializing object detection on candidate video...");
       await objectServiceRef.current.initialize(
         detectionVideo,
         detectionCanvasRef.current
@@ -443,7 +461,7 @@ const InterviewerDashboard = () => {
       }));
 
       setDetectionActive(true);
-      console.log("AI detection started successfully");
+      console.log("AI detection started successfully on candidate video");
     } catch (error) {
       console.error("Failed to start detection:", error);
     }
@@ -479,10 +497,18 @@ const InterviewerDashboard = () => {
         id: Date.now(),
         type: event.type,
         description: event.message || `Focus violation: ${event.type}`,
-        severity: "warning",
+        severity: event.type === "multiple_faces_detected" ? "high" : "medium",
         timestamp: new Date(),
         source: "focus_detection",
         confidence: event.confidence || 0.8,
+        metadata: {
+          eventType: event.type,
+          duration: event.duration || 0,
+          faceCount: event.faceCount || 1,
+          detectionSource: "interviewer_dashboard",
+          candidateVideo: true,
+          ...event
+        }
       };
 
       handleViolation(violation);
@@ -502,30 +528,106 @@ const InterviewerDashboard = () => {
         id: Date.now(),
         type: "unauthorized_item",
         description: event.message || "Unauthorized item detected",
-        severity: event.priority === "high" ? "critical" : "warning",
+        severity: event.priority === "high" ? "critical" : event.priority === "medium" ? "high" : "medium",
         timestamp: new Date(),
         source: "object_detection",
         confidence: event.confidence || 0.8,
+        metadata: {
+          eventType: event.type,
+          itemType: event.itemType || "unknown",
+          priority: event.priority || "medium",
+          boundingBox: event.boundingBox || null,
+          coordinates: event.coordinates || null,
+          detectionSource: "interviewer_dashboard",
+          candidateVideo: true,
+          ...event
+        }
       };
 
       handleViolation(violation);
     }
   }, []);
 
-  const handleViolation = (violation) => {
-    setViolations((prev) => [...prev, violation]);
-    setServiceStats((prev) => ({
-      ...prev,
-      violations: prev.violations + 1,
-    }));
+  const handleViolation = async (violation) => {
+    try {
+      console.log("Processing violation in interviewer dashboard:", violation);
+      
+      // Add violation to local state
+      setViolations((prev) => [...prev, violation]);
+      setServiceStats((prev) => ({
+        ...prev,
+        violations: prev.violations + 1,
+      }));
 
-    // Send violation to backend and candidate
-    if (socket) {
-      socket.emit("violation-recorded", {
+      // Capture screenshot as evidence
+      let screenshotBlob = null;
+      if (detectionCanvasRef.current) {
+        try {
+          const screenshot = detectionCanvasRef.current.toDataURL("image/jpeg", 0.8);
+          const response = await fetch(screenshot);
+          screenshotBlob = await response.blob();
+        } catch (screenshotError) {
+          console.warn("Failed to capture screenshot:", screenshotError);
+        }
+      }
+
+      // Prepare violation data for backend
+      const violationData = {
         sessionId,
-        violation,
-        timestamp: new Date(),
-      });
+        type: violation.type,
+        description: violation.description,
+        confidence: violation.confidence || 0.8,
+        timestamp: violation.timestamp || new Date(),
+        severity: violation.severity || "medium",
+        source: violation.source || "interviewer_detection",
+        metadata: violation.metadata || {}
+      };
+
+      // Send to backend via API
+      try {
+        const formData = new FormData();
+        formData.append("sessionId", sessionId);
+        formData.append("type", violationData.type);
+        formData.append("description", violationData.description);
+        formData.append("confidence", violationData.confidence);
+        formData.append("timestamp", violationData.timestamp.toISOString());
+        formData.append("severity", violationData.severity);
+        formData.append("source", violationData.source);
+        formData.append("metadata", JSON.stringify(violationData.metadata));
+        
+        if (screenshotBlob) {
+          formData.append(
+            "screenshot",
+            screenshotBlob,
+            `violation-${Date.now()}.jpg`
+          );
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/violations`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log("Violation saved to backend:", result);
+        } else {
+          console.error("Failed to save violation to backend:", response.statusText);
+        }
+      } catch (apiError) {
+        console.error("Error sending violation to backend:", apiError);
+      }
+
+      // Send violation to candidate via socket
+      if (socket) {
+        socket.emit("violation-recorded", {
+          sessionId,
+          violation: violationData,
+          timestamp: new Date(),
+        });
+      }
+    } catch (error) {
+      console.error("Error handling violation:", error);
     }
   };
 
@@ -793,6 +895,8 @@ const InterviewerDashboard = () => {
       width: "100%",
       height: "100%",
       pointerEvents: "none",
+      zIndex: 5,
+      borderRadius: "12px",
     },
     interviewerVideo: {
       background: "linear-gradient(135deg, #1f2937 0%, #374151 100%)",
@@ -1163,6 +1267,8 @@ const InterviewerDashboard = () => {
                     <canvas
                       ref={detectionCanvasRef}
                       style={styles.detectionCanvas}
+                      width={640}
+                      height={480}
                     />
                   </>
                 ) : (

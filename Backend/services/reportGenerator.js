@@ -39,7 +39,10 @@ class ReportGenerator {
       // Add content
       this.addHeader(doc, interview);
       this.addInterviewSummary(doc, interview);
+      this.addCandidateDetails(doc, interview, violations);
       this.addViolationSummary(doc, violationSummary);
+      this.addDetectionStatistics(doc, violations);
+      this.addDetectionAnalysis(doc, violations);
       this.addViolationAnalysis(doc, violations);
       this.addViolationDetails(doc, violations);
       this.addFooter(doc);
@@ -72,11 +75,20 @@ class ReportGenerator {
       .fillColor('#2C3E50')
       .text('INTERVIEW PROCTORING REPORT', 50, 50, { align: 'center' });
 
-    // Line under title
+    // Candidate information in header
+    doc.fontSize(16)
+      .fillColor('#34495E')
+      .text(`Candidate: ${interview.candidateName || 'Unknown'}`, 50, 90, { align: 'center' });
+
+    doc.fontSize(14)
+      .fillColor('#7F8C8D')
+      .text(`Session ID: ${interview.sessionId || 'N/A'}`, 50, 110, { align: 'center' });
+
+    // Line under header
     doc.strokeColor('#3498DB')
       .lineWidth(3)
-      .moveTo(50, 85)
-      .lineTo(545, 85)
+      .moveTo(50, 130)
+      .lineTo(545, 130)
       .stroke();
 
     doc.moveDown(2);
@@ -99,8 +111,6 @@ class ReportGenerator {
     // Interview details with proper validation
     const details = [
       ['Session ID:', interview.sessionId || 'N/A'],
-      ['Candidate Name:', interview.candidateName || 'Unknown'],
-      ['Candidate Email:', interview.candidateEmail || 'N/A'],
       ['Interviewer:', interview.interviewerName || 'Unknown'],
       ['Start Time:', interview.startTime ? new Date(interview.startTime).toLocaleString() : 'N/A'],
       ['End Time:', interview.endTime ? new Date(interview.endTime).toLocaleString() : 'In Progress'],
@@ -108,7 +118,8 @@ class ReportGenerator {
       ['Status:', (interview.status || 'unknown').toUpperCase()],
       ['Integrity Score:', `${interview.integrityScore || 0}/100`],
       ['Total Violations:', interview.violationCount || 0],
-      ['Focus Lost Count:', interview.focusLostCount || 0]
+      ['Focus Lost Count:', interview.focusLostCount || 0],
+      ['Object Violations:', interview.objectViolationCount || 0]
     ];
 
     details.forEach(([label, value]) => {
@@ -120,7 +131,236 @@ class ReportGenerator {
       y += 20;
     });
 
-    doc.moveDown(2);
+    y += 10;
+
+    // Add candidate summary box
+    doc.rect(50, y, 500, 60)
+      .fill('#F8F9FA')
+      .stroke('#E9ECEF');
+
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('CANDIDATE SUMMARY', 60, y + 10);
+
+    doc.fontSize(12)
+      .fillColor('#495057')
+      .text(`Name: ${interview.candidateName || 'Unknown'}`, 60, y + 30)
+      .text(`Email: ${interview.candidateEmail || 'N/A'}`, 60, y + 45);
+
+    doc.moveDown(3);
+  }
+
+  addCandidateDetails(doc, interview, violations) {
+    const currentY = doc.y;
+
+    // Section title
+    doc.fontSize(16)
+      .fillColor('#2C3E50')
+      .text('CANDIDATE DETAILS', 50, currentY);
+
+    doc.fontSize(12)
+      .fillColor('#000000');
+
+    const startY = currentY + 30;
+    let y = startY;
+
+    // Candidate basic information
+    const candidateDetails = [
+      ['Full Name:', interview.candidateName || 'Unknown'],
+      ['Email Address:', interview.candidateEmail || 'N/A'],
+      ['Session ID:', interview.sessionId || 'N/A'],
+      ['Interview Date:', interview.startTime ? new Date(interview.startTime).toLocaleDateString() : 'N/A'],
+      ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A']
+    ];
+
+    // Add candidate information
+    candidateDetails.forEach(([label, value]) => {
+      const displayValue = value !== undefined && value !== null ? value.toString() : 'N/A';
+      doc.text(label, 50, y, { continued: false })
+        .text(displayValue, 200, y, { continued: false });
+      y += 20;
+    });
+
+    y += 10;
+
+    // Candidate performance analysis
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('PERFORMANCE ANALYSIS:', 50, y);
+    y += 25;
+
+    // Calculate performance metrics
+    const totalViolations = violations.length;
+    const focusViolations = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking')).length;
+    const objectViolations = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item')).length;
+
+    // Calculate violation frequency per hour
+    const durationHours = interview.duration ? interview.duration / 60 : 1; // Convert minutes to hours
+    const violationsPerHour = durationHours > 0 ? (totalViolations / durationHours).toFixed(2) : totalViolations;
+    const focusViolationsPerHour = durationHours > 0 ? (focusViolations / durationHours).toFixed(2) : focusViolations;
+    const objectViolationsPerHour = durationHours > 0 ? (objectViolations / durationHours).toFixed(2) : objectViolations;
+
+    const performanceDetails = [
+      ['Total Violations:', totalViolations.toString()],
+      ['Focus Violations:', focusViolations.toString()],
+      ['Object Violations:', objectViolations.toString()],
+      ['Violations per Hour:', violationsPerHour],
+      ['Focus Violations per Hour:', focusViolationsPerHour],
+      ['Object Violations per Hour:', objectViolationsPerHour],
+      ['Integrity Score:', `${interview.integrityScore || 0}/100`],
+      ['Focus Lost Count:', (interview.focusLostCount || 0).toString()],
+      ['Object Violation Count:', (interview.objectViolationCount || 0).toString()]
+    ];
+
+    performanceDetails.forEach(([label, value]) => {
+      doc.text(label, 70, y, { continued: false })
+        .text(value, 250, y, { continued: false });
+      y += 18;
+    });
+
+    y += 10;
+
+    // Candidate behavior patterns
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('BEHAVIOR PATTERNS:', 50, y);
+    y += 25;
+
+    // Analyze violation patterns
+    const violationTypes = {};
+    const severityCounts = { low: 0, medium: 0, high: 0, critical: 0 };
+    const timePatterns = { morning: 0, afternoon: 0, evening: 0 };
+    let totalDuration = 0;
+
+    violations.forEach(violation => {
+      // Count by type
+      violationTypes[violation.type] = (violationTypes[violation.type] || 0) + 1;
+
+      // Count by severity
+      if (severityCounts.hasOwnProperty(violation.severity)) {
+        severityCounts[violation.severity]++;
+      }
+
+      // Analyze time patterns
+      const hour = new Date(violation.timestamp).getHours();
+      if (hour >= 6 && hour < 12) timePatterns.morning++;
+      else if (hour >= 12 && hour < 18) timePatterns.afternoon++;
+      else timePatterns.evening++;
+
+      // Sum duration
+      if (violation.duration) {
+        totalDuration += violation.duration;
+      }
+    });
+
+    // Most common violation type
+    const mostCommonType = Object.keys(violationTypes).length > 0 ?
+      Object.keys(violationTypes).reduce((a, b) => violationTypes[a] > violationTypes[b] ? a : b) : 'None';
+
+    // Risk assessment
+    const riskLevel = this.assessRiskLevel(violations, severityCounts);
+
+    const behaviorDetails = [
+      ['Most Common Violation:', mostCommonType.replace(/_/g, ' ').toUpperCase()],
+      ['Risk Level:', riskLevel],
+      ['Total Violation Duration:', `${Math.round(totalDuration)} seconds`],
+      ['Morning Violations:', timePatterns.morning.toString()],
+      ['Afternoon Violations:', timePatterns.afternoon.toString()],
+      ['Evening Violations:', timePatterns.evening.toString()]
+    ];
+
+    behaviorDetails.forEach(([label, value]) => {
+      doc.text(label, 70, y, { continued: false })
+        .text(value, 250, y, { continued: false });
+      y += 18;
+    });
+
+    y += 10;
+
+    // Severity breakdown
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('VIOLATION SEVERITY BREAKDOWN:', 50, y);
+    y += 25;
+
+    Object.entries(severityCounts).forEach(([severity, count]) => {
+      if (count > 0) {
+        const color = this.getSeverityColor(severity);
+        doc.fillColor(color)
+          .text(`${severity.toUpperCase()}: ${count} violations`, 70, y);
+        y += 15;
+      }
+    });
+
+    y += 20;
+
+    // Candidate compliance summary
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('COMPLIANCE SUMMARY:', 50, y);
+    y += 25;
+
+    // Generate compliance assessment
+    let complianceLevel = 'EXCELLENT';
+    let complianceNotes = [];
+
+    if (totalViolations === 0) {
+      complianceLevel = 'EXCELLENT';
+      complianceNotes.push('No violations detected during the interview');
+    } else if (totalViolations <= 2) {
+      complianceLevel = 'GOOD';
+      complianceNotes.push('Minimal violations detected');
+    } else if (totalViolations <= 5) {
+      complianceLevel = 'FAIR';
+      complianceNotes.push('Moderate number of violations');
+    } else if (totalViolations <= 10) {
+      complianceLevel = 'POOR';
+      complianceNotes.push('High number of violations detected');
+    } else {
+      complianceLevel = 'VERY POOR';
+      complianceNotes.push('Excessive violations detected');
+    }
+
+    // Add specific notes based on violation types
+    if (focusViolations > objectViolations) {
+      complianceNotes.push('More focus-related violations than object violations');
+    } else if (objectViolations > focusViolations) {
+      complianceNotes.push('More object-related violations than focus violations');
+    }
+
+    if (severityCounts.critical > 0) {
+      complianceNotes.push('Critical violations detected');
+    }
+
+    if (violationsPerHour > 5) {
+      complianceNotes.push('High violation frequency');
+    }
+
+    doc.fillColor('#000000')
+      .text(`Compliance Level: ${complianceLevel}`, 70, y);
+    y += 20;
+
+    complianceNotes.forEach(note => {
+      doc.text(`• ${note}`, 90, y);
+      y += 15;
+    });
+
+    y += 20;
+
+    // Interview notes if available
+    if (interview.notes) {
+      doc.fontSize(14)
+        .fillColor('#2C3E50')
+        .text('INTERVIEW NOTES:', 50, y);
+      y += 25;
+
+      doc.fontSize(12)
+        .fillColor('#000000')
+        .text(interview.notes, 70, y, { width: 500 });
+      y += 30;
+    }
+
+    doc.y = y + 20;
   }
 
   addViolationSummary(doc, violationSummary) {
@@ -189,6 +429,344 @@ class ReportGenerator {
 
     doc.y = rowY + 20;
     doc.moveDown(1);
+  }
+
+  addDetectionStatistics(doc, violations) {
+    if (violations.length === 0) return;
+
+    const currentY = doc.y;
+
+    // Section title
+    doc.fontSize(16)
+      .fillColor('#2C3E50')
+      .text('DETECTION STATISTICS', 50, currentY);
+
+    doc.fontSize(12);
+    let y = currentY + 30;
+
+    // Calculate detection statistics
+    const focusDetections = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking'));
+    const objectDetections = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item'));
+
+    // Create statistics table
+    const tableTop = y;
+    const tableHeaders = ['Detection Type', 'Total Count', 'High Confidence', 'Medium Confidence', 'Low Confidence'];
+    const columnWidths = [150, 80, 100, 100, 100];
+    let x = 50;
+
+    doc.fontSize(10)
+      .fillColor('#FFFFFF');
+
+    // Header background
+    doc.rect(50, tableTop, 530, 20)
+      .fill('#3498DB');
+
+    // Header text
+    tableHeaders.forEach((header, i) => {
+      doc.text(header, x + 5, tableTop + 5, { width: columnWidths[i] - 10 });
+      x += columnWidths[i];
+    });
+
+    // Table rows
+    let rowY = tableTop + 20;
+    doc.fillColor('#000000');
+
+    // Focus Detection Row
+    const focusHighConfidence = focusDetections.filter(v => v.confidence && v.confidence > 0.8).length;
+    const focusMediumConfidence = focusDetections.filter(v => v.confidence && v.confidence > 0.5 && v.confidence <= 0.8).length;
+    const focusLowConfidence = focusDetections.filter(v => v.confidence && v.confidence <= 0.5).length;
+
+    const bgColor1 = '#F8F9FA';
+    doc.rect(50, rowY, 530, 20)
+      .fill(bgColor1);
+
+    x = 50;
+    const focusRowData = [
+      'Focus Detection',
+      focusDetections.length.toString(),
+      focusHighConfidence.toString(),
+      focusMediumConfidence.toString(),
+      focusLowConfidence.toString()
+    ];
+
+    focusRowData.forEach((data, i) => {
+      doc.fillColor('#000000')
+        .text(data, x + 5, rowY + 5, { width: columnWidths[i] - 10 });
+      x += columnWidths[i];
+    });
+
+    rowY += 20;
+
+    // Object Detection Row
+    const objectHighConfidence = objectDetections.filter(v => v.confidence && v.confidence > 0.8).length;
+    const objectMediumConfidence = objectDetections.filter(v => v.confidence && v.confidence > 0.5 && v.confidence <= 0.8).length;
+    const objectLowConfidence = objectDetections.filter(v => v.confidence && v.confidence <= 0.5).length;
+
+    const bgColor2 = '#FFFFFF';
+    doc.rect(50, rowY, 530, 20)
+      .fill(bgColor2);
+
+    x = 50;
+    const objectRowData = [
+      'Object Detection',
+      objectDetections.length.toString(),
+      objectHighConfidence.toString(),
+      objectMediumConfidence.toString(),
+      objectLowConfidence.toString()
+    ];
+
+    objectRowData.forEach((data, i) => {
+      doc.fillColor('#000000')
+        .text(data, x + 5, rowY + 5, { width: columnWidths[i] - 10 });
+      x += columnWidths[i];
+    });
+
+    rowY += 20;
+
+    // Total Row
+    const totalHighConfidence = focusHighConfidence + objectHighConfidence;
+    const totalMediumConfidence = focusMediumConfidence + objectMediumConfidence;
+    const totalLowConfidence = focusLowConfidence + objectLowConfidence;
+
+    const bgColor3 = '#E8F4FD';
+    doc.rect(50, rowY, 530, 20)
+      .fill(bgColor3);
+
+    x = 50;
+    const totalRowData = [
+      'TOTAL',
+      violations.length.toString(),
+      totalHighConfidence.toString(),
+      totalMediumConfidence.toString(),
+      totalLowConfidence.toString()
+    ];
+
+    totalRowData.forEach((data, i) => {
+      doc.fillColor('#000000')
+        .fontSize(10)
+        .font('Helvetica-Bold')
+        .text(data, x + 5, rowY + 5, { width: columnWidths[i] - 10 });
+      x += columnWidths[i];
+    });
+
+    // Reset font
+    doc.font('Helvetica');
+
+    doc.y = rowY + 30;
+    doc.moveDown(1);
+  }
+
+  addDetectionAnalysis(doc, violations) {
+    if (violations.length === 0) return;
+
+    const currentY = doc.y;
+
+    // Section title
+    doc.fontSize(16)
+      .fillColor('#2C3E50')
+      .text('DETECTION ANALYSIS', 50, currentY);
+
+    doc.fontSize(12);
+    let y = currentY + 30;
+
+    // Analyze focus detections
+    const focusDetections = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking'));
+    const objectDetections = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item'));
+
+    // Focus Detection Analysis
+    doc.fillColor('#000000')
+      .text('FOCUS DETECTION ANALYSIS:', 50, y);
+    y += 25;
+
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text(`Total Focus Violations: ${focusDetections.length}`, 50, y);
+    y += 20;
+
+    if (focusDetections.length > 0) {
+      doc.fontSize(12)
+        .fillColor('#000000');
+
+      // Focus detection breakdown by type
+      const focusTypes = {};
+      focusDetections.forEach(violation => {
+        const type = violation.type || 'unknown';
+        focusTypes[type] = (focusTypes[type] || 0) + 1;
+      });
+
+      doc.text('Focus Violation Breakdown:', 70, y);
+      y += 20;
+
+      Object.entries(focusTypes).forEach(([type, count]) => {
+        const displayType = type.replace(/_/g, ' ').toUpperCase();
+        doc.text(`• ${displayType}: ${count} occurrences`, 90, y);
+        y += 15;
+      });
+
+      y += 10;
+
+      // Focus detection confidence analysis
+      const focusHighConfidence = focusDetections.filter(v => v.confidence && v.confidence > 0.8).length;
+      const focusMediumConfidence = focusDetections.filter(v => v.confidence && v.confidence > 0.5 && v.confidence <= 0.8).length;
+      const focusLowConfidence = focusDetections.filter(v => v.confidence && v.confidence <= 0.5).length;
+
+      doc.text('Focus Detection Confidence:', 70, y);
+      y += 20;
+      doc.text(`• High Confidence (>80%): ${focusHighConfidence} detections`, 90, y);
+      y += 15;
+      doc.text(`• Medium Confidence (50-80%): ${focusMediumConfidence} detections`, 90, y);
+      y += 15;
+      doc.text(`• Low Confidence (<50%): ${focusLowConfidence} detections`, 90, y);
+      y += 20;
+    }
+
+    // Object Detection Analysis
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text(`Total Object Violations: ${objectDetections.length}`, 50, y);
+    y += 20;
+
+    if (objectDetections.length > 0) {
+      doc.fontSize(12)
+        .fillColor('#000000');
+
+      // Object detection breakdown by item type
+      const objectTypes = {};
+      objectDetections.forEach(violation => {
+        let itemType = 'unknown';
+        if (violation.metadata && violation.metadata.itemType) {
+          itemType = violation.metadata.itemType;
+        } else if (violation.type === 'unauthorized_item') {
+          itemType = 'unauthorized_item';
+        }
+        objectTypes[itemType] = (objectTypes[itemType] || 0) + 1;
+      });
+
+      doc.text('Object Violation Breakdown:', 70, y);
+      y += 20;
+
+      Object.entries(objectTypes).forEach(([type, count]) => {
+        const displayType = type.replace(/_/g, ' ').toUpperCase();
+        doc.text(`• ${displayType}: ${count} occurrences`, 90, y);
+        y += 15;
+      });
+
+      y += 10;
+
+      // Object detection priority analysis
+      const highPriorityObjects = objectDetections.filter(v => v.metadata && v.metadata.priority === 'high').length;
+      const mediumPriorityObjects = objectDetections.filter(v => v.metadata && v.metadata.priority === 'medium').length;
+      const lowPriorityObjects = objectDetections.filter(v => v.metadata && v.metadata.priority === 'low').length;
+
+      doc.text('Object Detection Priority:', 70, y);
+      y += 20;
+      doc.text(`• High Priority: ${highPriorityObjects} detections`, 90, y);
+      y += 15;
+      doc.text(`• Medium Priority: ${mediumPriorityObjects} detections`, 90, y);
+      y += 15;
+      doc.text(`• Low Priority: ${lowPriorityObjects} detections`, 90, y);
+      y += 20;
+
+      // Object detection confidence analysis
+      const objectHighConfidence = objectDetections.filter(v => v.confidence && v.confidence > 0.8).length;
+      const objectMediumConfidence = objectDetections.filter(v => v.confidence && v.confidence > 0.5 && v.confidence <= 0.8).length;
+      const objectLowConfidence = objectDetections.filter(v => v.confidence && v.confidence <= 0.5).length;
+
+      doc.text('Object Detection Confidence:', 70, y);
+      y += 20;
+      doc.text(`• High Confidence (>80%): ${objectHighConfidence} detections`, 90, y);
+      y += 15;
+      doc.text(`• Medium Confidence (50-80%): ${objectMediumConfidence} detections`, 90, y);
+      y += 15;
+      doc.text(`• Low Confidence (<50%): ${objectLowConfidence} detections`, 90, y);
+      y += 20;
+    }
+
+    // Overall Detection Summary
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('OVERALL DETECTION SUMMARY:', 50, y);
+    y += 20;
+
+    doc.fontSize(12)
+      .fillColor('#000000');
+
+    // Detection sources
+    const detectionSources = {};
+    const videoSources = {};
+    const detectionTypes = {};
+
+    violations.forEach(violation => {
+      if (violation.metadata) {
+        // Detection source analysis
+        const source = violation.metadata.detectionSource || violation.source || 'unknown';
+        detectionSources[source] = (detectionSources[source] || 0) + 1;
+
+        // Video source analysis
+        const videoSource = violation.metadata.detectionLocation === 'candidate_side' ? 'candidate' : 'interviewer';
+        videoSources[videoSource] = (videoSources[videoSource] || 0) + 1;
+
+        // Detection type analysis
+        const detectionType = violation.source || 'unknown';
+        detectionTypes[detectionType] = (detectionTypes[detectionType] || 0) + 1;
+      } else {
+        // Fallback for violations without metadata
+        const detectionType = violation.source || 'unknown';
+        detectionTypes[detectionType] = (detectionTypes[detectionType] || 0) + 1;
+        detectionSources['unknown'] = (detectionSources['unknown'] || 0) + 1;
+        videoSources['unknown'] = (videoSources['unknown'] || 0) + 1;
+      }
+    });
+
+    // Detection source breakdown
+    doc.text('Detection Source Analysis:', 70, y);
+    y += 20;
+
+    Object.entries(detectionSources).forEach(([source, count]) => {
+      doc.text(`• ${source}: ${count} detections`, 90, y);
+      y += 15;
+    });
+
+    y += 10;
+
+    // Video source breakdown
+    doc.text('Video Source Analysis:', 70, y);
+    y += 20;
+
+    Object.entries(videoSources).forEach(([videoSource, count]) => {
+      doc.text(`• ${videoSource} video: ${count} detections`, 90, y);
+      y += 15;
+    });
+
+    y += 10;
+
+    // Detection type breakdown
+    doc.text('Detection Type Analysis:', 70, y);
+    y += 20;
+
+    Object.entries(detectionTypes).forEach(([type, count]) => {
+      doc.text(`• ${type}: ${count} detections`, 90, y);
+      y += 15;
+    });
+
+    y += 20;
+
+    // Overall detection quality analysis
+    const highConfidenceDetections = violations.filter(v => v.confidence && v.confidence > 0.8).length;
+    const mediumConfidenceDetections = violations.filter(v => v.confidence && v.confidence > 0.5 && v.confidence <= 0.8).length;
+    const lowConfidenceDetections = violations.filter(v => v.confidence && v.confidence <= 0.5).length;
+
+    doc.text('Overall Detection Quality:', 70, y);
+    y += 20;
+
+    doc.text(`• High Confidence (>80%): ${highConfidenceDetections} detections`, 90, y);
+    y += 15;
+    doc.text(`• Medium Confidence (50-80%): ${mediumConfidenceDetections} detections`, 90, y);
+    y += 15;
+    doc.text(`• Low Confidence (<50%): ${lowConfidenceDetections} detections`, 90, y);
+    y += 15;
+
+    doc.y = y + 20;
   }
 
   addViolationAnalysis(doc, violations) {
@@ -390,12 +968,56 @@ class ReportGenerator {
       // Add metadata if available
       if (violation.metadata && typeof violation.metadata === 'object') {
         const metadataStr = JSON.stringify(violation.metadata, null, 2);
-        if (metadataStr.length > 100) {
-          doc.text(`Metadata: ${metadataStr.substring(0, 100)}...`, 70, y + 90);
+        if (metadataStr.length > 200) {
+          doc.text(`Detection Details: ${metadataStr.substring(0, 200)}...`, 70, y + 90);
         } else {
-          doc.text(`Metadata: ${metadataStr}`, 70, y + 90);
+          doc.text(`Detection Details: ${metadataStr}`, 70, y + 90);
         }
         y += 15;
+      }
+
+      // Add specific detection information
+      if (violation.metadata) {
+        if (violation.metadata.detectionLocation) {
+          doc.text(`Detection Location: ${violation.metadata.detectionLocation}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.candidateInfo) {
+          doc.text(`Candidate: ${violation.metadata.candidateInfo}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.videoDimensions) {
+          doc.text(`Video Resolution: ${violation.metadata.videoDimensions.width}x${violation.metadata.videoDimensions.height}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.detectionTimestamp) {
+          doc.text(`Detection Time: ${new Date(violation.metadata.detectionTimestamp).toLocaleString()}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.itemType) {
+          doc.text(`Item Type: ${violation.metadata.itemType}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.faceCount) {
+          doc.text(`Face Count: ${violation.metadata.faceCount}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.coordinates) {
+          doc.text(`Location: x:${violation.metadata.coordinates.x}, y:${violation.metadata.coordinates.y}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.priority) {
+          doc.text(`Priority Level: ${violation.metadata.priority.toUpperCase()}`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.duration) {
+          doc.text(`Detection Duration: ${violation.metadata.duration}ms`, 70, y + 90);
+          y += 15;
+        }
+        if (violation.metadata.eventType) {
+          doc.text(`Event Type: ${violation.metadata.eventType}`, 70, y + 90);
+          y += 15;
+        }
       }
 
       // Add screenshot indicator if available

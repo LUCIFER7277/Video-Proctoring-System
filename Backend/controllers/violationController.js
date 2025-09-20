@@ -14,8 +14,18 @@ const logViolation = async (req, res) => {
       timestamp,
       duration,
       severity = 'medium',
+      source = 'unknown',
       metadata
     } = req.body;
+
+    console.log('📝 Logging violation:', {
+      sessionId,
+      type,
+      description,
+      severity,
+      source,
+      hasMetadata: !!metadata
+    });
 
     // Find the interview
     const interview = await Interview.findOne({ sessionId });
@@ -26,45 +36,76 @@ const logViolation = async (req, res) => {
       });
     }
 
-    // Create violation record
+    // Parse metadata if it's a string
+    let parsedMetadata = metadata;
+    if (typeof metadata === 'string') {
+      try {
+        parsedMetadata = JSON.parse(metadata);
+      } catch (e) {
+        console.warn('Failed to parse metadata JSON:', e.message);
+        parsedMetadata = { raw: metadata };
+      }
+    }
+
+    // Create violation record with enhanced data
     const violation = new Violation({
       interviewId: interview._id,
       sessionId,
       type,
       description,
-      confidence,
+      confidence: parseFloat(confidence) || 0.5,
       timestamp: timestamp ? new Date(timestamp) : new Date(),
-      duration,
+      duration: parseFloat(duration) || 0,
       severity,
-      metadata
+      source,
+      metadata: parsedMetadata || {}
     });
 
     // Handle screenshot if provided
     if (req.file) {
       violation.screenshotPath = `/uploads/evidence/${req.file.filename}`;
+      console.log('📸 Screenshot saved:', violation.screenshotPath);
     }
 
     await violation.save();
+    console.log('✅ Violation saved to database:', violation._id);
 
-    // Update interview violation count
+    // Update interview violation count with more comprehensive tracking
     const violationCount = await Violation.countDocuments({ sessionId });
     const focusLostCount = await Violation.countDocuments({
       sessionId,
-      type: { $in: ['focus_lost', 'looking_away', 'no_face_detected'] }
+      type: { $in: ['focus_lost', 'looking_away', 'no_face_detected', 'multiple_faces_detected'] }
+    });
+    const objectViolations = await Violation.countDocuments({
+      sessionId,
+      type: { $in: ['unauthorized_item', 'phone_detected', 'book_detected', 'notes_detected', 'device_detected'] }
     });
 
     interview.violationCount = violationCount;
     interview.focusLostCount = focusLostCount;
+    interview.objectViolationCount = objectViolations;
     interview.calculateIntegrityScore();
     await interview.save();
+
+    console.log('📊 Interview stats updated:', {
+      violationCount,
+      focusLostCount,
+      objectViolations,
+      integrityScore: interview.integrityScore
+    });
 
     res.status(201).json({
       success: true,
       data: violation,
-      integrityScore: interview.integrityScore
+      integrityScore: interview.integrityScore,
+      stats: {
+        totalViolations: violationCount,
+        focusViolations: focusLostCount,
+        objectViolations: objectViolations
+      }
     });
   } catch (error) {
-    console.error('Error logging violation:', error);
+    console.error('❌ Error logging violation:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to log violation',
