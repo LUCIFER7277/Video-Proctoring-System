@@ -1383,7 +1383,7 @@ const CandidateRoom = () => {
 
           {/* Local Video (Self) */}
           <div style={styles.localVideoContainer}>
-            {localStream && !isVideoMuted && localStream.getVideoTracks().length > 0 && localStream.getVideoTracks()[0].readyState === 'live' ? (
+            {localStream && !isVideoMuted ? (
               <video
                 ref={localVideoRef}
                 style={styles.localVideo}
@@ -1397,12 +1397,18 @@ const CandidateRoom = () => {
                   console.error('Local video error:', e);
                   addNotification('Video display error', 'error');
                 }}
+                onCanPlay={() => {
+                  console.log('Local video can play');
+                }}
+                onPlay={() => {
+                  console.log('Local video started playing');
+                }}
               />
             ) : (
               <div style={styles.noVideo}>
                 <div style={{ fontSize: '24px', marginBottom: '8px' }}>📷</div>
                 <div style={{ fontSize: '12px', color: '#666' }}>
-                  {isVideoMuted ? 'Camera Off' : 'No Camera'}
+                  {isVideoMuted ? 'Camera Off' : localStream ? 'Camera Initializing...' : 'No Camera'}
                 </div>
                 {isVideoMuted && (
                   <button
