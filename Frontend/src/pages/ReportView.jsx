@@ -13,7 +13,7 @@ const ReportView = () => {
   const [reportUrl, setReportUrl] = useState('');
   const [generating, setGenerating] = useState(false);
 
-  const API_BASE_URL = '/api';
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api';
 
   useEffect(() => {
     loadReportData();

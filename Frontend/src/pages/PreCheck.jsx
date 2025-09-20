@@ -433,7 +433,7 @@ const PreCheck = () => {
 
       if (!sessionId) {
         // Create new interview session if no valid existing session
-        const createResponse = await axios.post('/api/interviews', {
+        const createResponse = await axios.post(`${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews`, {
           candidateName: candidateInfo.candidateName,
           candidateEmail: candidateInfo.candidateEmail,
           interviewerName: candidateInfo.interviewerName

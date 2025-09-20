@@ -58,7 +58,7 @@ const Login = () => {
         };
 
         const response = await axios.post(
-          `${import.meta.env.VITE_API_URL}/interviews`,
+          `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews`,
           interviewData
         );
 
@@ -79,7 +79,7 @@ const Login = () => {
 
         // Validate session exists
         try {
-          const validateResponse = await axios.get(`/api/interviews/${sessionId}`);
+          const validateResponse = await axios.get(`${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}`);
           if (!validateResponse.data.success) {
             throw new Error('Session not found');
           }

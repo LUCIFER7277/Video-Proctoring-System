@@ -27,6 +27,51 @@ const server = http.createServer(app);
 
 const io = configureSocket(server);
 
+// Apply CORS middleware first, before other middleware
+const cors = require('cors');
+const { corsOptions } = require('./middleware/index.js');
+
+// Apply CORS with more permissive settings for debugging
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      "https://video-proctoring-system-pink.vercel.app",
+      "https://video-proctoring-system01.netlify.app",
+      "http://localhost:3000",
+      "http://localhost:5173"
+    ];
+
+    // Add production frontend URL(s) from environment variable
+    if (process.env.FRONTEND_URL) {
+      const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+      allowedOrigins.push(...frontendUrls);
+    }
+
+    console.log('CORS check - Origin:', origin, 'Allowed:', allowedOrigins.includes(origin));
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+}));
+
+// Handle preflight OPTIONS requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
 // Apply security middleware
 app.use(securityMiddleware);
 
@@ -50,10 +95,13 @@ app.use('/api/violations', violationRoutes);
 app.use('/api/reports', reportRoutes);
 
 app.get('/api/health', (req, res) => {
+  console.log('Health check request from origin:', req.headers.origin);
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    activeInterviews: io.getActiveInterviews ? io.getActiveInterviews().size : 0
+    activeInterviews: io.getActiveInterviews ? io.getActiveInterviews().size : 0,
+    origin: req.headers.origin,
+    userAgent: req.headers['user-agent']
   });
 });
 
