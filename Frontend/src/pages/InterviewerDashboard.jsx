@@ -359,6 +359,18 @@ const InterviewerDashboard = () => {
             });
           };
 
+          // Force video to display by triggering a manual play
+          setTimeout(() => {
+            if (remoteVideoRef.current) {
+              console.log("📺 FORCE PLAY: Attempting to force remote video play");
+              remoteVideoRef.current.play().then(() => {
+                console.log("📺 FORCE PLAY: Remote video play successful");
+              }).catch((e) => {
+                console.error("📺 FORCE PLAY: Remote video play failed:", e);
+              });
+            }
+          }, 1000);
+
           try {
             remoteVideoRef.current.muted = false;
           } catch {}
@@ -1363,10 +1375,21 @@ const InterviewerDashboard = () => {
                       style={styles.video}
                       autoPlay
                       playsInline
+                      controls={false}
+                      muted={false}
+                      onLoadedMetadata={() => {
+                        console.log("📺 FIXED: Remote video metadata loaded");
+                        console.log("📺 FIXED: Video dimensions:", {
+                          width: remoteVideoRef.current?.videoWidth,
+                          height: remoteVideoRef.current?.videoHeight
+                        });
+                      }}
+                      onPlay={() => console.log("📺 FIXED: Remote video started playing")}
+                      onError={(e) => console.error("📺 FIXED: Remote video error:", e)}
                     />
                     <canvas
                       ref={detectionCanvasRef}
-                      style={styles.detectionCanvas}
+                      style={{...styles.detectionCanvas, opacity: 0.1, display: 'none'}}
                       width={640}
                       height={480}
                     />

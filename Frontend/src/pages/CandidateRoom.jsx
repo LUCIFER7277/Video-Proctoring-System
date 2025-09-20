@@ -481,17 +481,34 @@ const CandidateRoom = () => {
 
       // Get local stream and set it to video element
       const stream = service.localStream;
-      console.log("📹 Local stream from service:", stream ? "Available" : "Not available");
-      
+      console.log("📹 CANDIDATE DEBUG: Local stream from service:", stream ? "Available" : "Not available");
+
       if (stream) {
-        console.log("📊 Stream details:", {
+        console.log("📊 CANDIDATE DEBUG: Stream details:", {
           id: stream.id,
           active: stream.active,
           tracks: stream.getTracks().map(t => ({
             kind: t.kind,
             enabled: t.enabled,
-            readyState: t.readyState
+            readyState: t.readyState,
+            id: t.id
           }))
+        });
+
+        // Check video tracks specifically
+        const videoTracks = stream.getVideoTracks();
+        console.log("📹 CANDIDATE DEBUG: Video tracks count:", videoTracks.length);
+        videoTracks.forEach((track, i) => {
+          console.log(`📹 CANDIDATE DEBUG: Video track ${i}:`, {
+            id: track.id,
+            kind: track.kind,
+            enabled: track.enabled,
+            readyState: track.readyState,
+            label: track.label,
+            muted: track.muted,
+            constraints: track.getConstraints(),
+            settings: track.getSettings()
+          });
         });
         
         setLocalStream(stream);
