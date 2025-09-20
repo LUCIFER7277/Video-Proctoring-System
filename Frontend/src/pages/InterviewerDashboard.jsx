@@ -123,15 +123,21 @@ const InterviewerDashboard = () => {
   // Ensure video elements get streams when refs are available
   useEffect(() => {
     if (localStream && localVideoRef.current) {
-      console.log("Setting local video source...");
+      console.log("🎥 DEBUG: Setting local video source...");
+      console.log("🎥 DEBUG: Local stream ID:", localStream.id);
+      console.log("🎥 DEBUG: Local stream tracks:", localStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
       localVideoRef.current.srcObject = localStream;
+      console.log("🎥 DEBUG: Local video element srcObject set:", localVideoRef.current.srcObject?.id);
     }
   }, [localStream]);
 
   useEffect(() => {
     if (remoteStream && remoteVideoRef.current) {
-      console.log("Setting remote video source...");
+      console.log("📺 DEBUG: Setting remote video source...");
+      console.log("📺 DEBUG: Remote stream ID:", remoteStream.id);
+      console.log("📺 DEBUG: Remote stream tracks:", remoteStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
       remoteVideoRef.current.srcObject = remoteStream;
+      console.log("📺 DEBUG: Remote video element srcObject set:", remoteVideoRef.current.srcObject?.id);
     }
   }, [remoteStream]);
 
@@ -277,7 +283,9 @@ const InterviewerDashboard = () => {
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
-        console.log("Set local video srcObject");
+        console.log("🎥 DEBUG: Set local video srcObject in initializeLocalStream");
+        console.log("🎥 DEBUG: Stream ID:", stream.id);
+        console.log("🎥 DEBUG: Video element:", localVideoRef.current);
       }
 
       console.log("Interviewer local stream initialized successfully");
@@ -312,9 +320,15 @@ const InterviewerDashboard = () => {
       // Set up event handlers
       service.onRemoteStream = (candidateStream) => {
         console.log("📹 INTERVIEWER: Received candidate stream");
+        console.log("📺 DEBUG: Candidate stream ID:", candidateStream.id);
+        console.log("📺 DEBUG: Candidate stream tracks:", candidateStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
+        console.log("📺 DEBUG: Current local stream ID for comparison:", localStream?.id);
+        console.log("📺 DEBUG: Are streams the same?", candidateStream.id === localStream?.id);
+
         setRemoteStream(candidateStream);
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = candidateStream;
+          console.log("📺 DEBUG: Remote video element srcObject set:", remoteVideoRef.current.srcObject?.id);
           try {
             remoteVideoRef.current.muted = false;
           } catch {}
@@ -351,9 +365,12 @@ const InterviewerDashboard = () => {
 
       // Get local stream and set it to video element
       const stream = service.localStream;
+      console.log("🎥 DEBUG: Getting stream from WebRTC service:", stream?.id);
+      console.log("🎥 DEBUG: Service local stream tracks:", stream?.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+        console.log("🎥 DEBUG: Set local video from service stream");
       }
 
       // Create peer connection
@@ -678,6 +695,36 @@ const InterviewerDashboard = () => {
       navigate(`/report/${sessionId}`);
     }
   };
+
+  // Debug function to check video elements periodically
+  const debugVideoElements = () => {
+    console.log("🔍 DEBUG: Video Elements Status:");
+    console.log("🔍 Local Video Element:", {
+      exists: !!localVideoRef.current,
+      srcObject: localVideoRef.current?.srcObject?.id,
+      tracks: localVideoRef.current?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
+      playing: !localVideoRef.current?.paused,
+      readyState: localVideoRef.current?.readyState
+    });
+    console.log("🔍 Remote Video Element:", {
+      exists: !!remoteVideoRef.current,
+      srcObject: remoteVideoRef.current?.srcObject?.id,
+      tracks: remoteVideoRef.current?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
+      playing: !remoteVideoRef.current?.paused,
+      readyState: remoteVideoRef.current?.readyState
+    });
+    console.log("🔍 State Streams:", {
+      localStreamId: localStream?.id,
+      remoteStreamId: remoteStream?.id,
+      streamsAreSame: localStream?.id === remoteStream?.id
+    });
+  };
+
+  // Add debug interval
+  useEffect(() => {
+    const debugInterval = setInterval(debugVideoElements, 10000); // Every 10 seconds
+    return () => clearInterval(debugInterval);
+  }, [localStream, remoteStream]);
 
   const cleanup = () => {
     if (webrtcServiceRef.current) {

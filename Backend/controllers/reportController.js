@@ -5,24 +5,78 @@ const fs = require('fs');
 
 const reportGenerator = new ReportGenerator();
 
+// Test endpoint to check if report generation is working
+const testReportGeneration = async (req, res) => {
+  try {
+    console.log('Test report generation endpoint called');
+
+    // Find any interview to test with
+    const interview = await Interview.findOne().sort({ createdAt: -1 });
+    if (!interview) {
+      return res.status(404).json({
+        success: false,
+        message: 'No interviews found to test with'
+      });
+    }
+
+    console.log('Testing with interview:', interview._id);
+
+    // Test the report generation
+    const result = await reportGenerator.generateInterviewReport(interview._id);
+
+    res.json({
+      success: true,
+      message: 'Test completed',
+      result: result,
+      interviewId: interview._id,
+      candidateName: interview.candidateName
+    });
+  } catch (error) {
+    console.error('Test report generation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message,
+      stack: error.stack
+    });
+  }
+};
+
 // Generate PDF report for a specific interview
 const generateInterviewReport = async (req, res) => {
   try {
     const { interviewId } = req.params;
 
+    console.log('Report generation request received for interviewId:', interviewId);
+
     // Validate interview exists
     const interview = await Interview.findById(interviewId);
     if (!interview) {
+      console.log('Interview not found for ID:', interviewId);
       return res.status(404).json({
         success: false,
         message: 'Interview not found'
       });
     }
 
+    console.log('Interview found:', {
+      id: interview._id,
+      sessionId: interview.sessionId,
+      candidateName: interview.candidateName,
+      status: interview.status,
+      startTime: interview.startTime,
+      endTime: interview.endTime,
+      integrityScore: interview.integrityScore,
+      violationCount: interview.violationCount,
+      focusLostCount: interview.focusLostCount,
+      objectViolationCount: interview.objectViolationCount
+    });
+
     // Generate report
     const result = await reportGenerator.generateInterviewReport(interviewId);
 
     if (result.success) {
+      console.log('Report generated successfully:', result.filename);
       res.json({
         success: true,
         message: 'Report generated successfully',
@@ -31,6 +85,7 @@ const generateInterviewReport = async (req, res) => {
         downloadUrl: `/api/reports/download/${result.filename}`
       });
     } else {
+      console.error('Report generation failed:', result.error);
       res.status(500).json({
         success: false,
         message: 'Failed to generate report',
@@ -39,6 +94,7 @@ const generateInterviewReport = async (req, res) => {
     }
   } catch (error) {
     console.error('Error in generateInterviewReport:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -263,6 +319,7 @@ const getInterviewStats = async (req, res) => {
 };
 
 module.exports = {
+  testReportGeneration,
   generateInterviewReport,
   generateBulkReport,
   downloadReport,

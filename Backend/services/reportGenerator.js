@@ -18,41 +18,75 @@ class ReportGenerator {
 
   async generateInterviewReport(interviewId) {
     try {
+      console.log('Starting report generation for interview:', interviewId);
+
       // Fetch interview data
       const interview = await Interview.findById(interviewId);
       if (!interview) {
         throw new Error('Interview not found');
       }
 
+      console.log('Interview found:', interview.candidateName);
+
       // Fetch violations
       const violations = await Violation.find({ interviewId }).sort({ timestamp: 1 });
       const violationSummary = await Violation.getViolationSummary(interviewId);
+
+      console.log('Violations found:', violations.length);
+      console.log('Violation summary:', violationSummary.length);
 
       // Create PDF
       const doc = new PDFDocument({ margin: 50 });
       const filename = `interview_report_${interview.sessionId}_${Date.now()}.pdf`;
       const filePath = path.join(this.reportsDir, filename);
 
+      console.log('Creating PDF file:', filePath);
+
       // Pipe PDF to file
       doc.pipe(fs.createWriteStream(filePath));
 
-      // Add content
-      this.addHeader(doc, interview);
-      this.addInterviewSummary(doc, interview);
-      this.addCandidateDetails(doc, interview, violations);
-      this.addViolationSummary(doc, violationSummary);
-      this.addDetectionStatistics(doc, violations);
-      this.addDetectionAnalysis(doc, violations);
-      this.addViolationAnalysis(doc, violations);
-      this.addViolationDetails(doc, violations);
-      this.addFooter(doc);
+      // Add content with error handling for each section
+      try {
+        console.log('Adding header...');
+        this.addHeader(doc, interview);
+
+        console.log('Adding interview summary...');
+        this.addInterviewSummary(doc, interview);
+
+        console.log('Adding candidate details...');
+        this.addCandidateDetails(doc, interview, violations);
+
+        console.log('Adding violation summary...');
+        this.addViolationSummary(doc, violationSummary);
+
+        console.log('Adding detection statistics...');
+        this.addDetectionStatistics(doc, violations);
+
+        console.log('Adding detection analysis...');
+        this.addDetectionAnalysis(doc, violations);
+
+        console.log('Adding violation analysis...');
+        this.addViolationAnalysis(doc, violations);
+
+        console.log('Adding violation details...');
+        this.addViolationDetails(doc, violations);
+
+        console.log('Adding footer...');
+        this.addFooter(doc);
+      } catch (sectionError) {
+        console.error('Error in PDF section:', sectionError);
+        throw sectionError;
+      }
 
       // Finalize PDF
+      console.log('Finalizing PDF...');
       doc.end();
 
       // Update interview with report path
       interview.reportPath = filePath;
       await interview.save();
+
+      console.log('Report generated successfully:', filePath);
 
       return {
         success: true,
@@ -62,6 +96,7 @@ class ReportGenerator {
 
     } catch (error) {
       console.error('Error generating report:', error);
+      console.error('Error stack:', error.stack);
       return {
         success: false,
         error: error.message
@@ -151,216 +186,225 @@ class ReportGenerator {
   }
 
   addCandidateDetails(doc, interview, violations) {
-    const currentY = doc.y;
+    try {
+      const currentY = doc.y;
 
-    // Section title
-    doc.fontSize(16)
-      .fillColor('#2C3E50')
-      .text('CANDIDATE DETAILS', 50, currentY);
-
-    doc.fontSize(12)
-      .fillColor('#000000');
-
-    const startY = currentY + 30;
-    let y = startY;
-
-    // Candidate basic information
-    const candidateDetails = [
-      ['Full Name:', interview.candidateName || 'Unknown'],
-      ['Email Address:', interview.candidateEmail || 'N/A'],
-      ['Session ID:', interview.sessionId || 'N/A'],
-      ['Interview Date:', interview.startTime ? new Date(interview.startTime).toLocaleDateString() : 'N/A'],
-      ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A']
-    ];
-
-    // Add candidate information
-    candidateDetails.forEach(([label, value]) => {
-      const displayValue = value !== undefined && value !== null ? value.toString() : 'N/A';
-      doc.text(label, 50, y, { continued: false })
-        .text(displayValue, 200, y, { continued: false });
-      y += 20;
-    });
-
-    y += 10;
-
-    // Candidate performance analysis
-    doc.fontSize(14)
-      .fillColor('#2C3E50')
-      .text('PERFORMANCE ANALYSIS:', 50, y);
-    y += 25;
-
-    // Calculate performance metrics
-    const totalViolations = violations.length;
-    const focusViolations = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking')).length;
-    const objectViolations = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item')).length;
-
-    // Calculate violation frequency per hour
-    const durationHours = interview.duration ? interview.duration / 60 : 1; // Convert minutes to hours
-    const violationsPerHour = durationHours > 0 ? (totalViolations / durationHours).toFixed(2) : totalViolations;
-    const focusViolationsPerHour = durationHours > 0 ? (focusViolations / durationHours).toFixed(2) : focusViolations;
-    const objectViolationsPerHour = durationHours > 0 ? (objectViolations / durationHours).toFixed(2) : objectViolations;
-
-    const performanceDetails = [
-      ['Total Violations:', totalViolations.toString()],
-      ['Focus Violations:', focusViolations.toString()],
-      ['Object Violations:', objectViolations.toString()],
-      ['Violations per Hour:', violationsPerHour],
-      ['Focus Violations per Hour:', focusViolationsPerHour],
-      ['Object Violations per Hour:', objectViolationsPerHour],
-      ['Integrity Score:', `${interview.integrityScore || 0}/100`],
-      ['Focus Lost Count:', (interview.focusLostCount || 0).toString()],
-      ['Object Violation Count:', (interview.objectViolationCount || 0).toString()]
-    ];
-
-    performanceDetails.forEach(([label, value]) => {
-      doc.text(label, 70, y, { continued: false })
-        .text(value, 250, y, { continued: false });
-      y += 18;
-    });
-
-    y += 10;
-
-    // Candidate behavior patterns
-    doc.fontSize(14)
-      .fillColor('#2C3E50')
-      .text('BEHAVIOR PATTERNS:', 50, y);
-    y += 25;
-
-    // Analyze violation patterns
-    const violationTypes = {};
-    const severityCounts = { low: 0, medium: 0, high: 0, critical: 0 };
-    const timePatterns = { morning: 0, afternoon: 0, evening: 0 };
-    let totalDuration = 0;
-
-    violations.forEach(violation => {
-      // Count by type
-      violationTypes[violation.type] = (violationTypes[violation.type] || 0) + 1;
-
-      // Count by severity
-      if (severityCounts.hasOwnProperty(violation.severity)) {
-        severityCounts[violation.severity]++;
-      }
-
-      // Analyze time patterns
-      const hour = new Date(violation.timestamp).getHours();
-      if (hour >= 6 && hour < 12) timePatterns.morning++;
-      else if (hour >= 12 && hour < 18) timePatterns.afternoon++;
-      else timePatterns.evening++;
-
-      // Sum duration
-      if (violation.duration) {
-        totalDuration += violation.duration;
-      }
-    });
-
-    // Most common violation type
-    const mostCommonType = Object.keys(violationTypes).length > 0 ?
-      Object.keys(violationTypes).reduce((a, b) => violationTypes[a] > violationTypes[b] ? a : b) : 'None';
-
-    // Risk assessment
-    const riskLevel = this.assessRiskLevel(violations, severityCounts);
-
-    const behaviorDetails = [
-      ['Most Common Violation:', mostCommonType.replace(/_/g, ' ').toUpperCase()],
-      ['Risk Level:', riskLevel],
-      ['Total Violation Duration:', `${Math.round(totalDuration)} seconds`],
-      ['Morning Violations:', timePatterns.morning.toString()],
-      ['Afternoon Violations:', timePatterns.afternoon.toString()],
-      ['Evening Violations:', timePatterns.evening.toString()]
-    ];
-
-    behaviorDetails.forEach(([label, value]) => {
-      doc.text(label, 70, y, { continued: false })
-        .text(value, 250, y, { continued: false });
-      y += 18;
-    });
-
-    y += 10;
-
-    // Severity breakdown
-    doc.fontSize(14)
-      .fillColor('#2C3E50')
-      .text('VIOLATION SEVERITY BREAKDOWN:', 50, y);
-    y += 25;
-
-    Object.entries(severityCounts).forEach(([severity, count]) => {
-      if (count > 0) {
-        const color = this.getSeverityColor(severity);
-        doc.fillColor(color)
-          .text(`${severity.toUpperCase()}: ${count} violations`, 70, y);
-        y += 15;
-      }
-    });
-
-    y += 20;
-
-    // Candidate compliance summary
-    doc.fontSize(14)
-      .fillColor('#2C3E50')
-      .text('COMPLIANCE SUMMARY:', 50, y);
-    y += 25;
-
-    // Generate compliance assessment
-    let complianceLevel = 'EXCELLENT';
-    let complianceNotes = [];
-
-    if (totalViolations === 0) {
-      complianceLevel = 'EXCELLENT';
-      complianceNotes.push('No violations detected during the interview');
-    } else if (totalViolations <= 2) {
-      complianceLevel = 'GOOD';
-      complianceNotes.push('Minimal violations detected');
-    } else if (totalViolations <= 5) {
-      complianceLevel = 'FAIR';
-      complianceNotes.push('Moderate number of violations');
-    } else if (totalViolations <= 10) {
-      complianceLevel = 'POOR';
-      complianceNotes.push('High number of violations detected');
-    } else {
-      complianceLevel = 'VERY POOR';
-      complianceNotes.push('Excessive violations detected');
-    }
-
-    // Add specific notes based on violation types
-    if (focusViolations > objectViolations) {
-      complianceNotes.push('More focus-related violations than object violations');
-    } else if (objectViolations > focusViolations) {
-      complianceNotes.push('More object-related violations than focus violations');
-    }
-
-    if (severityCounts.critical > 0) {
-      complianceNotes.push('Critical violations detected');
-    }
-
-    if (violationsPerHour > 5) {
-      complianceNotes.push('High violation frequency');
-    }
-
-    doc.fillColor('#000000')
-      .text(`Compliance Level: ${complianceLevel}`, 70, y);
-    y += 20;
-
-    complianceNotes.forEach(note => {
-      doc.text(`• ${note}`, 90, y);
-      y += 15;
-    });
-
-    y += 20;
-
-    // Interview notes if available
-    if (interview.notes) {
-      doc.fontSize(14)
+      // Section title
+      doc.fontSize(16)
         .fillColor('#2C3E50')
-        .text('INTERVIEW NOTES:', 50, y);
-      y += 25;
+        .text('CANDIDATE DETAILS', 50, currentY);
 
       doc.fontSize(12)
-        .fillColor('#000000')
-        .text(interview.notes, 70, y, { width: 500 });
-      y += 30;
-    }
+        .fillColor('#000000');
 
-    doc.y = y + 20;
+      const startY = currentY + 30;
+      let y = startY;
+
+      // Candidate basic information
+      const candidateDetails = [
+        ['Full Name:', interview.candidateName || 'Unknown'],
+        ['Email Address:', interview.candidateEmail || 'N/A'],
+        ['Session ID:', interview.sessionId || 'N/A'],
+        ['Interview Date:', interview.startTime ? new Date(interview.startTime).toLocaleDateString() : 'N/A'],
+        ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A']
+      ];
+
+      // Add candidate information
+      candidateDetails.forEach(([label, value]) => {
+        const displayValue = value !== undefined && value !== null ? value.toString() : 'N/A';
+        doc.text(label, 50, y, { continued: false })
+          .text(displayValue, 200, y, { continued: false });
+        y += 20;
+      });
+
+      y += 10;
+
+      // Candidate performance analysis
+      doc.fontSize(14)
+        .fillColor('#2C3E50')
+        .text('PERFORMANCE ANALYSIS:', 50, y);
+      y += 25;
+
+      // Calculate performance metrics
+      const totalViolations = violations.length;
+      const focusViolations = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking')).length;
+      const objectViolations = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item')).length;
+
+      // Calculate violation frequency per hour
+      const durationHours = interview.duration ? interview.duration / 60 : 1; // Convert minutes to hours
+      const violationsPerHour = durationHours > 0 ? (totalViolations / durationHours).toFixed(2) : totalViolations;
+      const focusViolationsPerHour = durationHours > 0 ? (focusViolations / durationHours).toFixed(2) : focusViolations;
+      const objectViolationsPerHour = durationHours > 0 ? (objectViolations / durationHours).toFixed(2) : objectViolations;
+
+      const performanceDetails = [
+        ['Total Violations:', totalViolations.toString()],
+        ['Focus Violations:', focusViolations.toString()],
+        ['Object Violations:', objectViolations.toString()],
+        ['Violations per Hour:', violationsPerHour],
+        ['Focus Violations per Hour:', focusViolationsPerHour],
+        ['Object Violations per Hour:', objectViolationsPerHour],
+        ['Integrity Score:', `${interview.integrityScore || 0}/100`],
+        ['Focus Lost Count:', (interview.focusLostCount || 0).toString()],
+        ['Object Violation Count:', (interview.objectViolationCount || 0).toString()]
+      ];
+
+      performanceDetails.forEach(([label, value]) => {
+        doc.text(label, 70, y, { continued: false })
+          .text(value, 250, y, { continued: false });
+        y += 18;
+      });
+
+      y += 10;
+
+      // Candidate behavior patterns
+      doc.fontSize(14)
+        .fillColor('#2C3E50')
+        .text('BEHAVIOR PATTERNS:', 50, y);
+      y += 25;
+
+      // Analyze violation patterns
+      const violationTypes = {};
+      const severityCounts = { low: 0, medium: 0, high: 0, critical: 0 };
+      const timePatterns = { morning: 0, afternoon: 0, evening: 0 };
+      let totalDuration = 0;
+
+      violations.forEach(violation => {
+        // Count by type
+        violationTypes[violation.type] = (violationTypes[violation.type] || 0) + 1;
+
+        // Count by severity
+        if (severityCounts.hasOwnProperty(violation.severity)) {
+          severityCounts[violation.severity]++;
+        }
+
+        // Analyze time patterns
+        const hour = new Date(violation.timestamp).getHours();
+        if (hour >= 6 && hour < 12) timePatterns.morning++;
+        else if (hour >= 12 && hour < 18) timePatterns.afternoon++;
+        else timePatterns.evening++;
+
+        // Sum duration
+        if (violation.duration) {
+          totalDuration += violation.duration;
+        }
+      });
+
+      // Most common violation type
+      const mostCommonType = Object.keys(violationTypes).length > 0 ?
+        Object.keys(violationTypes).reduce((a, b) => violationTypes[a] > violationTypes[b] ? a : b) : 'None';
+
+      // Risk assessment
+      const riskLevel = this.assessRiskLevel(violations, severityCounts);
+
+      const behaviorDetails = [
+        ['Most Common Violation:', mostCommonType.replace(/_/g, ' ').toUpperCase()],
+        ['Risk Level:', riskLevel],
+        ['Total Violation Duration:', `${Math.round(totalDuration)} seconds`],
+        ['Morning Violations:', timePatterns.morning.toString()],
+        ['Afternoon Violations:', timePatterns.afternoon.toString()],
+        ['Evening Violations:', timePatterns.evening.toString()]
+      ];
+
+      behaviorDetails.forEach(([label, value]) => {
+        doc.text(label, 70, y, { continued: false })
+          .text(value, 250, y, { continued: false });
+        y += 18;
+      });
+
+      y += 10;
+
+      // Severity breakdown
+      doc.fontSize(14)
+        .fillColor('#2C3E50')
+        .text('VIOLATION SEVERITY BREAKDOWN:', 50, y);
+      y += 25;
+
+      Object.entries(severityCounts).forEach(([severity, count]) => {
+        if (count > 0) {
+          const color = this.getSeverityColor(severity);
+          doc.fillColor(color)
+            .text(`${severity.toUpperCase()}: ${count} violations`, 70, y);
+          y += 15;
+        }
+      });
+
+      y += 20;
+
+      // Candidate compliance summary
+      doc.fontSize(14)
+        .fillColor('#2C3E50')
+        .text('COMPLIANCE SUMMARY:', 50, y);
+      y += 25;
+
+      // Generate compliance assessment
+      let complianceLevel = 'EXCELLENT';
+      let complianceNotes = [];
+
+      if (totalViolations === 0) {
+        complianceLevel = 'EXCELLENT';
+        complianceNotes.push('No violations detected during the interview');
+      } else if (totalViolations <= 2) {
+        complianceLevel = 'GOOD';
+        complianceNotes.push('Minimal violations detected');
+      } else if (totalViolations <= 5) {
+        complianceLevel = 'FAIR';
+        complianceNotes.push('Moderate number of violations');
+      } else if (totalViolations <= 10) {
+        complianceLevel = 'POOR';
+        complianceNotes.push('High number of violations detected');
+      } else {
+        complianceLevel = 'VERY POOR';
+        complianceNotes.push('Excessive violations detected');
+      }
+
+      // Add specific notes based on violation types
+      if (focusViolations > objectViolations) {
+        complianceNotes.push('More focus-related violations than object violations');
+      } else if (objectViolations > focusViolations) {
+        complianceNotes.push('More object-related violations than focus violations');
+      }
+
+      if (severityCounts.critical > 0) {
+        complianceNotes.push('Critical violations detected');
+      }
+
+      if (violationsPerHour > 5) {
+        complianceNotes.push('High violation frequency');
+      }
+
+      doc.fillColor('#000000')
+        .text(`Compliance Level: ${complianceLevel}`, 70, y);
+      y += 20;
+
+      complianceNotes.forEach(note => {
+        doc.text(`• ${note}`, 90, y);
+        y += 15;
+      });
+
+      y += 20;
+
+      // Interview notes if available
+      if (interview.notes) {
+        doc.fontSize(14)
+          .fillColor('#2C3E50')
+          .text('INTERVIEW NOTES:', 50, y);
+        y += 25;
+
+        doc.fontSize(12)
+          .fillColor('#000000')
+          .text(interview.notes, 70, y, { width: 500 });
+        y += 30;
+      }
+
+      doc.y = y + 20;
+    } catch (error) {
+      console.error('Error in addCandidateDetails:', error);
+      // Add a simple fallback
+      doc.fontSize(12)
+        .fillColor('#000000')
+        .text('Error loading candidate details', 50, doc.y);
+      doc.moveDown(2);
+    }
   }
 
   addViolationSummary(doc, violationSummary) {

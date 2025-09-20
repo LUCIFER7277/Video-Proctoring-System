@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
+  testReportGeneration,
   generateInterviewReport,
   generateBulkReport,
   downloadReport,
@@ -8,6 +9,9 @@ const {
   deleteReport,
   getInterviewStats
 } = require('../controllers/reportController');
+
+// Test report generation
+router.get('/test', testReportGeneration);
 
 // Generate PDF report for specific interview
 router.post('/generate/:interviewId', generateInterviewReport);
