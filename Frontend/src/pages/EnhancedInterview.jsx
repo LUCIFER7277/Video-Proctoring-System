@@ -33,21 +33,12 @@ const EnhancedInterview = () => {
   });
   const [videoStatus, setVideoStatus] = useState({ hasStream: false, isPlaying: false });
 
-  // User role and stream management
-  const [userRole, setUserRole] = useState(null); // 'candidate' or 'interviewer'
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null);
-  const [candidateStream, setCandidateStream] = useState(null); // The stream to monitor for focus detection
-
   // Service status
   const [serviceStats, setServiceStats] = useState({
     focusEvents: 0,
     objectEvents: 0,
     totalEvents: 0,
-    violations: 0,
-    focusLossCount: 0, // Track total focus loss incidents
-    lookingAwayCount: 0, // Track looking away incidents
-    noFaceCount: 0 // Track no face detected incidents
+    violations: 0
   });
 
   // Refs
@@ -55,43 +46,6 @@ const EnhancedInterview = () => {
   const focusCanvasRef = useRef(null);
   const objectCanvasRef = useRef(null);
   const timeIntervalRef = useRef(null);
-
-  // Function to detect user role based on URL params or user data
-  const detectUserRole = async () => {
-    try {
-      // Get user info from localStorage or API
-      const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
-
-      // Check if role is specified in URL params
-      const urlParams = new URLSearchParams(window.location.search);
-      const roleParam = urlParams.get('role');
-
-      if (roleParam && ['candidate', 'interviewer'].includes(roleParam)) {
-        setUserRole(roleParam);
-        console.log('Role detected from URL:', roleParam);
-        return roleParam;
-      }
-
-      // Check user info for role
-      if (userInfo.role) {
-        setUserRole(userInfo.role);
-        console.log('Role detected from user info:', userInfo.role);
-        return userInfo.role;
-      }
-
-      // Default to candidate if accessing /interview/:sessionId without role
-      const defaultRole = 'candidate';
-      setUserRole(defaultRole);
-      console.log('Using default role:', defaultRole);
-      return defaultRole;
-
-    } catch (error) {
-      console.error('Error detecting user role:', error);
-      // Default to candidate on error
-      setUserRole('candidate');
-      return 'candidate';
-    }
-  };
 
   // Service instances
   const focusServiceRef = useRef(new FocusDetectionService());
