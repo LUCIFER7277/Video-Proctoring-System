@@ -75,12 +75,20 @@ app.use(cors({
 // Handle preflight OPTIONS requests explicitly
 app.options('*', (req, res) => {
   const origin = req.headers.origin;
-  res.header('Access-Control-Allow-Origin', origin || '*');
+  console.log('Preflight request from origin:', origin);
+
+  // Always allow the Vercel domain
+  if (origin === 'https://video-proctoring-system-pink.vercel.app' || !origin) {
+    res.header('Access-Control-Allow-Origin', origin || 'https://video-proctoring-system-pink.vercel.app');
+  } else {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-File-Name');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '3600'); // Cache preflight response for 1 hour
-  res.sendStatus(200);
+  res.status(200).end();
 });
 
 // Apply security middleware (without CORS since we handle it above)
@@ -99,6 +107,27 @@ app.use('/api/', generalLimiter);
 
 // Apply more permissive rate limiting specifically for violation endpoints
 app.use('/api/violations', violationLimiter);
+
+// Additional CORS middleware to ensure headers are always present
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  // Set CORS headers on every response
+  if (origin === 'https://video-proctoring-system-pink.vercel.app' ||
+      origin === 'https://video-proctoring-system01.netlify.app' ||
+      origin?.includes('localhost') ||
+      !origin) {
+    res.header('Access-Control-Allow-Origin', origin || 'https://video-proctoring-system-pink.vercel.app');
+  } else {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-File-Name');
+
+  next();
+});
 
 // CORS debugging middleware
 app.use((req, res, next) => {
