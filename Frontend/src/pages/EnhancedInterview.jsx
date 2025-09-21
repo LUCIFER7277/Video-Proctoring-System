@@ -1112,42 +1112,8 @@ const EnhancedInterview = () => {
             <div>Total Events: {serviceStats.totalEvents}</div>
           </div>
 
-          {/* Recent Violations */}
-          <h4>Recent Violations ({violations.length})</h4>
-          <div style={styles.violationsList}>
-            {violations.length === 0 ? (
-              <p
-                style={{
-                  color: "#27ae60",
-                  textAlign: "center",
-                  padding: "20px",
-                }}
-              >
-                ✅ No violations detected
-              </p>
-            ) : (
-              (violations || [])
-                .slice(-10)
-                .reverse()
-                .map(
-                  (violation, index) =>
-                    violation && (
-                      <div key={index} style={styles.violationItem}>
-                        <div style={{ fontWeight: "bold", color: "#e74c3c" }}>
-                          {violation.type.replace(/_/g, " ").toUpperCase()}
-                        </div>
-                        <div style={{ margin: "4px 0" }}>
-                          {violation.description}
-                        </div>
-                        <div style={{ fontSize: "12px", color: "#7f8c8d" }}>
-                          {new Date(violation.timestamp).toLocaleTimeString()}
-                          {violation.source && ` • ${violation.source}`}
-                        </div>
-                      </div>
-                    )
-                )
-            )}
-          </div>
+          {/* Violations section hidden from candidate view to prevent gaming */}
+          {/* Violations are still monitored and sent to backend for interviewer review */}
         </div>
       </div>
 

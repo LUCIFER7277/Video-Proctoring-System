@@ -920,37 +920,8 @@ const Interview = () => {
           </div>
         </div>
 
-        <div style={styles.violationsSection}>
-          <h3>Recent Violations ({violations.length})</h3>
-          <div style={styles.violationsList}>
-            {violations.length === 0 ? (
-              <p
-                style={{
-                  color: "#27ae60",
-                  textAlign: "center",
-                  padding: "20px",
-                }}
-              >
-                No violations detected
-              </p>
-            ) : (
-              violations
-                .slice(-10)
-                .reverse()
-                .map((violation, index) => (
-                  <div key={index} style={styles.violationItem}>
-                    <div style={styles.violationType}>
-                      {violation.type.replace(/_/g, " ")}
-                    </div>
-                    <div>{violation.description}</div>
-                    <div style={styles.violationTime}>
-                      {new Date(violation.timestamp).toLocaleTimeString()}
-                    </div>
-                  </div>
-                ))
-            )}
-          </div>
-        </div>
+        {/* Violations section hidden from candidate view to prevent gaming */}
+        {/* Violations are still monitored and sent to backend for interviewer review */}
       </div>
 
       <div style={styles.controlsSection}>

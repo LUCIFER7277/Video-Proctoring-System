@@ -848,9 +848,8 @@ const CandidateRoom = () => {
             });
           }
 
-          // Show notification to candidate
-          const notificationType = event.type.includes('detected') ? 'warning' : 'info';
-          addNotification(`Focus Detection: ${event.message}`, notificationType);
+          // Note: Focus detection events are monitored but not shown to candidate
+          // to maintain natural behavior and prevent gaming the system
         });
 
         console.log("✅ Focus detection service initialized");
@@ -893,8 +892,8 @@ const CandidateRoom = () => {
             });
           }
 
-          // Show notification to candidate
-          addNotification(`Object Detection: ${event.message}`, 'warning');
+          // Note: Object detection violations are sent to backend but not shown to candidate
+          // to avoid gaming the system or causing distraction during interview
         });
 
         console.log("✅ Object detection service initialized");
