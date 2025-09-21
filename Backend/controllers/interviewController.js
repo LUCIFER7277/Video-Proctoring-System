@@ -48,6 +48,15 @@ const startInterview = async (req, res) => {
       });
     }
 
+    // Check if candidate information is still placeholder
+    if (interview.candidateName === 'TBD' || interview.candidateEmail === 'candidate@example.com') {
+      return res.status(400).json({
+        success: false,
+        message: 'Candidate information is required before starting the interview. Please update candidate details first.',
+        requiresCandidateInfo: true
+      });
+    }
+
     interview.status = 'in_progress';
     interview.startTime = new Date();
     await interview.save();

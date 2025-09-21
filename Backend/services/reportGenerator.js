@@ -136,11 +136,14 @@ class ReportGenerator {
       let candidateEmail = interview.candidateEmail;
 
       // If candidate info is still placeholder, try to get better info
+      let candidateInfoMissing = false;
       if (candidateName === 'TBD' || candidateName === 'Unknown' || !candidateName) {
+        candidateInfoMissing = true;
         // Try to extract from violations or other sources
         const candidateViolation = violations.find(v => v.candidateName && v.candidateName !== 'TBD');
         if (candidateViolation) {
           candidateName = candidateViolation.candidateName;
+          candidateInfoMissing = false;
         } else {
           candidateName = `Candidate ${interview.sessionId.slice(0, 8)}`;
         }
@@ -153,7 +156,14 @@ class ReportGenerator {
           candidateEmail = candidateViolation.candidateEmail;
         } else {
           candidateEmail = 'Not provided';
+          candidateInfoMissing = true;
         }
+      }
+
+      // Log warning if candidate information was missing
+      if (candidateInfoMissing) {
+        console.warn(`⚠️  Missing candidate information for session ${interview.sessionId}. Using fallback values in report.`);
+        console.warn(`💡 Suggestion: Update candidate info using: PUT /api/reports/update-candidate/${interview.sessionId}`);
       }
 
       // Debug: Log interview statistics

@@ -33,4 +33,51 @@ router.get('/stats', getInterviewStats);
 // Delete report file
 router.delete('/:filename', deleteReport);
 
+// Update candidate information for a session (for fixing placeholder data)
+router.put('/update-candidate/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { candidateName, candidateEmail } = req.body;
+
+    if (!candidateName || !candidateEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Candidate name and email are required'
+      });
+    }
+
+    const Interview = require('../models/Interview');
+    const interview = await Interview.findOne({ sessionId });
+
+    if (!interview) {
+      return res.status(404).json({
+        success: false,
+        message: 'Interview session not found'
+      });
+    }
+
+    interview.candidateName = candidateName;
+    interview.candidateEmail = candidateEmail;
+    await interview.save();
+
+    res.json({
+      success: true,
+      message: 'Candidate information updated successfully',
+      data: {
+        sessionId: interview.sessionId,
+        candidateName: interview.candidateName,
+        candidateEmail: interview.candidateEmail
+      }
+    });
+
+  } catch (error) {
+    console.error('Error updating candidate info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update candidate information',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
