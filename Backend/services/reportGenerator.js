@@ -179,13 +179,13 @@ class ReportGenerator {
       // Add content with error handling for each section
       try {
         console.log('Adding header...');
-        this.addHeader(doc, interview);
+        this.addHeader(doc, interview, candidateName, candidateEmail);
 
         console.log('Adding interview summary...');
-        this.addInterviewSummary(doc, interview);
+        this.addInterviewSummary(doc, interview, candidateName, candidateEmail);
 
         console.log('Adding candidate details...');
-        this.addCandidateDetails(doc, interview, violations);
+        this.addCandidateDetails(doc, interview, violations, candidateName, candidateEmail);
 
         console.log('Adding violation summary...');
         this.addViolationSummary(doc, violationSummary);
@@ -235,7 +235,7 @@ class ReportGenerator {
     }
   }
 
-  addHeader(doc, interview) {
+  addHeader(doc, interview, candidateName, candidateEmail) {
     // Title
     doc.fontSize(24)
       .fillColor('#2C3E50')
@@ -244,7 +244,7 @@ class ReportGenerator {
     // Candidate information in header
     doc.fontSize(16)
       .fillColor('#34495E')
-      .text(`Candidate: ${candidateName}`, 50, 90, { align: 'center' });
+      .text(`Candidate: ${candidateName || interview.candidateName || 'Unknown'}`, 50, 90, { align: 'center' });
 
     doc.fontSize(14)
       .fillColor('#7F8C8D')
@@ -260,7 +260,7 @@ class ReportGenerator {
     doc.moveDown(2);
   }
 
-  addInterviewSummary(doc, interview) {
+  addInterviewSummary(doc, interview, candidateName, candidateEmail) {
     const currentY = doc.y;
 
     // Section title
@@ -310,13 +310,13 @@ class ReportGenerator {
 
     doc.fontSize(12)
       .fillColor('#495057')
-      .text(`Name: ${candidateName}`, 60, y + 30)
-      .text(`Email: ${candidateEmail}`, 60, y + 45);
+      .text(`Name: ${candidateName || interview.candidateName || 'Unknown'}`, 60, y + 30)
+      .text(`Email: ${candidateEmail || interview.candidateEmail || 'N/A'}`, 60, y + 45);
 
     doc.moveDown(3);
   }
 
-  addCandidateDetails(doc, interview, violations) {
+  addCandidateDetails(doc, interview, violations, candidateName, candidateEmail) {
     try {
       const currentY = doc.y;
 
@@ -333,8 +333,8 @@ class ReportGenerator {
 
       // Candidate basic information
       const candidateDetails = [
-        ['Full Name:', candidateName],
-        ['Email Address:', candidateEmail],
+        ['Full Name:', candidateName || interview.candidateName || 'Unknown'],
+        ['Email Address:', candidateEmail || interview.candidateEmail || 'N/A'],
         ['Session ID:', interview.sessionId || 'N/A'],
         ['Interview Date:', interview.startTime ? new Date(interview.startTime).toLocaleDateString() : 'N/A'],
         ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A']
