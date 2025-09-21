@@ -15,6 +15,8 @@ router.get('/test', testReportGeneration);
 
 // Generate PDF report for specific interview
 router.post('/generate/:interviewId', generateInterviewReport);
+router.get('/generate/:interviewId', generateInterviewReport);
+router.get('/generate/interview/:interviewId', generateInterviewReport);
 
 // Generate bulk report for date range
 router.post('/bulk', generateBulkReport);

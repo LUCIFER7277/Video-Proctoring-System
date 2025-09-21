@@ -50,7 +50,16 @@ const generateInterviewReport = async (req, res) => {
     console.log('Report generation request received for interviewId:', interviewId);
 
     // Validate interview exists - try both MongoDB _id and sessionId
-    let interview = await Interview.findById(interviewId);
+    let interview;
+    try {
+      // First try to find by MongoDB _id
+      interview = await Interview.findById(interviewId);
+    } catch (error) {
+      // If ObjectId casting fails, this is likely a sessionId string
+      console.log('ObjectId casting failed, trying sessionId lookup:', error.message);
+      interview = null;
+    }
+
     if (!interview) {
       // Try finding by sessionId if _id lookup failed
       interview = await Interview.findOne({ sessionId: interviewId });

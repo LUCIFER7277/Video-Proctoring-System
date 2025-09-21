@@ -34,8 +34,22 @@ class ReportGenerator {
     try {
       console.log('Starting report generation for interview:', interviewId);
 
-      // Fetch interview data
-      const interview = await Interview.findById(interviewId);
+      // Fetch interview data - handle both ObjectId and sessionId
+      let interview;
+      try {
+        // First try to find by MongoDB _id
+        interview = await Interview.findById(interviewId);
+      } catch (error) {
+        // If ObjectId casting fails, this is likely a sessionId string
+        console.log('ObjectId casting failed in reportGenerator, trying sessionId lookup:', error.message);
+        interview = null;
+      }
+
+      if (!interview) {
+        // Try finding by sessionId if _id lookup failed
+        interview = await Interview.findOne({ sessionId: interviewId });
+      }
+
       if (!interview) {
         throw new Error('Interview not found');
       }
