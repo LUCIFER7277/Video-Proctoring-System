@@ -76,8 +76,8 @@ interviewSchema.methods.calculateIntegrityScore = function () {
   // Deduct 15 points for each object violation (more serious)
   score -= (this.objectViolationCount || 0) * 15;
 
-  // Deduct 10 points for each other violation
-  score -= (this.violationCount - (this.objectViolationCount || 0)) * 10;
+  // Deduct 10 points for each other violation (excluding focus and object violations)
+  score -= (this.violationCount - (this.objectViolationCount || 0) - (this.focusLostCount || 0)) * 10;
 
   // Ensure score doesn't go below 0
   score = Math.max(0, score);

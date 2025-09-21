@@ -79,17 +79,25 @@ violationSchema.index({ sessionId: 1, type: 1 });
 
 // Static method to get violation summary
 violationSchema.statics.getViolationSummary = async function (interviewId) {
-  return await this.aggregate([
-    { $match: { interviewId: new mongoose.Types.ObjectId(interviewId) } },
-    {
-      $group: {
-        _id: '$type',
-        count: { $sum: 1 },
-        avgConfidence: { $avg: '$confidence' },
-        totalDuration: { $sum: '$duration' }
+  try {
+    // Try to use as ObjectId first
+    return await this.aggregate([
+      { $match: { interviewId: new mongoose.Types.ObjectId(interviewId) } },
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 },
+          avgConfidence: { $avg: '$confidence' },
+          totalDuration: { $sum: '$duration' }
+        }
       }
-    }
-  ]);
+    ]);
+  } catch (error) {
+    // If ObjectId conversion fails, it might be a sessionId string
+    // Return empty array as fallback
+    console.warn('Failed to get violation summary with ObjectId, trying fallback:', error.message);
+    return [];
+  }
 };
 
 module.exports = mongoose.model('Violation', violationSchema);

@@ -50,12 +50,22 @@ class ReportGenerator {
         violations = await Violation.find({ sessionId: interview.sessionId }).sort({ timestamp: 1 });
       }
 
-      // Get violation summary - try both methods
-      let violationSummary = await Violation.getViolationSummary(interviewId);
+      // Get violation summary - try both methods with error handling
+      let violationSummary = [];
+      try {
+        violationSummary = await Violation.getViolationSummary(interviewId);
+      } catch (error) {
+        console.warn('Failed to get violation summary by interviewId:', error.message);
+      }
 
       // If no summary from interviewId, try with sessionId
       if (violationSummary.length === 0) {
-        violationSummary = await this.getViolationSummaryBySessionId(interview.sessionId);
+        try {
+          violationSummary = await this.getViolationSummaryBySessionId(interview.sessionId);
+        } catch (error) {
+          console.warn('Failed to get violation summary by sessionId:', error.message);
+          violationSummary = []; // Ensure it's an empty array
+        }
       }
 
       console.log('Violations found:', violations.length);
