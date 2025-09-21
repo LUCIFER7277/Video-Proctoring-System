@@ -56,34 +56,60 @@ class ReportGenerator {
 
       console.log('Interview found:', interview.candidateName);
 
-      // Fetch violations using both interviewId and sessionId for better compatibility
-      let violations = await Violation.find({ interviewId }).sort({ timestamp: 1 });
+      // Fetch violations - prioritize sessionId since that's how violations are stored
+      let violations = await Violation.find({ sessionId: interview.sessionId }).sort({ timestamp: 1 });
 
-      // If no violations found by interviewId, try sessionId
+      // If no violations found by sessionId, try interviewId as fallback
       if (violations.length === 0) {
-        violations = await Violation.find({ sessionId: interview.sessionId }).sort({ timestamp: 1 });
+        violations = await Violation.find({ interviewId }).sort({ timestamp: 1 });
       }
 
-      // Get violation summary - try both methods with error handling
+      // Get violation summary - prioritize sessionId since that's how violations are stored
       let violationSummary = [];
       try {
-        violationSummary = await Violation.getViolationSummary(interviewId);
+        violationSummary = await this.getViolationSummaryBySessionId(interview.sessionId);
       } catch (error) {
-        console.warn('Failed to get violation summary by interviewId:', error.message);
+        console.warn('Failed to get violation summary by sessionId:', error.message);
+        violationSummary = []; // Ensure it's an empty array
       }
 
-      // If no summary from interviewId, try with sessionId
+      // If no summary from sessionId, try with interviewId as fallback
       if (violationSummary.length === 0) {
         try {
-          violationSummary = await this.getViolationSummaryBySessionId(interview.sessionId);
+          violationSummary = await Violation.getViolationSummary(interviewId);
         } catch (error) {
-          console.warn('Failed to get violation summary by sessionId:', error.message);
-          violationSummary = []; // Ensure it's an empty array
+          console.warn('Failed to get violation summary by interviewId:', error.message);
         }
       }
 
       console.log('Violations found:', violations.length);
       console.log('Violation summary:', violationSummary.length);
+
+      // Recalculate violation counts if they're missing or incorrect
+      const actualViolationCount = violations.length;
+      const actualFocusLostCount = violations.filter(v =>
+        v.type === 'face_not_detected' || v.type === 'multiple_faces' || v.type === 'focus_lost'
+      ).length;
+      const actualObjectViolationCount = violations.filter(v =>
+        v.type === 'object_detected' || v.type === 'prohibited_object'
+      ).length;
+
+      // Update interview record if counts are incorrect
+      if (interview.violationCount !== actualViolationCount ||
+          interview.focusLostCount !== actualFocusLostCount ||
+          interview.objectViolationCount !== actualObjectViolationCount) {
+
+        console.log('Updating violation counts in interview record');
+        interview.violationCount = actualViolationCount;
+        interview.focusLostCount = actualFocusLostCount;
+        interview.objectViolationCount = actualObjectViolationCount;
+
+        // Recalculate integrity score
+        interview.integrityScore = interview.calculateIntegrityScore();
+
+        // Save the updated interview
+        await interview.save();
+      }
 
       // Debug: Log actual violation data
       if (violations.length > 0) {
