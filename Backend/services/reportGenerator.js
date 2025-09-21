@@ -16,6 +16,30 @@ class ReportGenerator {
     }
   }
 
+  calculateDuration(interview) {
+    if (interview.duration && interview.duration > 0) {
+      return `${interview.duration} minutes`;
+    }
+
+    if (interview.startTime && interview.endTime) {
+      const startTime = new Date(interview.startTime);
+      const endTime = new Date(interview.endTime);
+      const durationMs = endTime - startTime;
+      const durationMinutes = Math.round(durationMs / (1000 * 60));
+      return `${durationMinutes} minutes`;
+    }
+
+    if (interview.startTime && !interview.endTime) {
+      const startTime = new Date(interview.startTime);
+      const currentTime = new Date();
+      const durationMs = currentTime - startTime;
+      const durationMinutes = Math.round(durationMs / (1000 * 60));
+      return `${durationMinutes} minutes (ongoing)`;
+    }
+
+    return 'N/A';
+  }
+
   async getViolationSummaryBySessionId(sessionId) {
     return await Violation.aggregate([
       { $match: { sessionId: sessionId } },
@@ -93,10 +117,15 @@ class ReportGenerator {
       // Recalculate violation counts if they're missing or incorrect
       const actualViolationCount = violations.length;
       const actualFocusLostCount = violations.filter(v =>
-        v.type === 'face_not_detected' || v.type === 'multiple_faces' || v.type === 'focus_lost'
+        v.type === 'face_not_detected' || v.type === 'no_face_detected' ||
+        v.type === 'multiple_faces' || v.type === 'multiple_faces_detected' ||
+        v.type === 'focus_lost' || v.type === 'looking_away' ||
+        v.type === 'absence' || v.type === 'eye_closure'
       ).length;
       const actualObjectViolationCount = violations.filter(v =>
-        v.type === 'object_detected' || v.type === 'prohibited_object'
+        v.type === 'phone_detected' || v.type === 'book_detected' ||
+        v.type === 'device_detected' || v.type === 'notes_detected' ||
+        v.type === 'unauthorized_item' || v.type === 'unauthorized_item_detected'
       ).length;
 
       // Update interview record if counts are incorrect
@@ -105,15 +134,28 @@ class ReportGenerator {
           interview.objectViolationCount !== actualObjectViolationCount) {
 
         console.log('Updating violation counts in interview record');
+        console.log(`Previous counts - Total: ${interview.violationCount}, Focus: ${interview.focusLostCount}, Object: ${interview.objectViolationCount}`);
+        console.log(`New counts - Total: ${actualViolationCount}, Focus: ${actualFocusLostCount}, Object: ${actualObjectViolationCount}`);
+
         interview.violationCount = actualViolationCount;
         interview.focusLostCount = actualFocusLostCount;
         interview.objectViolationCount = actualObjectViolationCount;
 
         // Recalculate integrity score
+        const oldScore = interview.integrityScore;
         interview.integrityScore = interview.calculateIntegrityScore();
+        console.log(`Integrity score updated from ${oldScore} to ${interview.integrityScore}`);
 
         // Save the updated interview
         await interview.save();
+      } else {
+        // Even if counts are correct, ensure integrity score is up-to-date
+        const currentScore = interview.calculateIntegrityScore();
+        if (interview.integrityScore !== currentScore) {
+          console.log(`Updating integrity score from ${interview.integrityScore} to ${currentScore}`);
+          interview.integrityScore = currentScore;
+          await interview.save();
+        }
       }
 
       // Debug: Log actual violation data
@@ -166,7 +208,7 @@ class ReportGenerator {
         console.warn(`💡 Suggestion: Update candidate info using: PUT /api/reports/update-candidate/${interview.sessionId}`);
       }
 
-      // Debug: Log interview statistics
+      // Debug: Log interview statistics with integrity score breakdown
       console.log('Interview statistics:', {
         violationCount: interview.violationCount,
         focusLostCount: interview.focusLostCount,
@@ -175,6 +217,15 @@ class ReportGenerator {
         finalCandidateName: candidateName,
         finalCandidateEmail: candidateEmail
       });
+
+      // Debug: Show integrity score calculation breakdown
+      console.log('Integrity Score Calculation:');
+      console.log(`  Base score: 100`);
+      console.log(`  Focus violations: ${interview.focusLostCount} × 5 points = -${interview.focusLostCount * 5} points`);
+      console.log(`  Object violations: ${interview.objectViolationCount} × 15 points = -${interview.objectViolationCount * 15} points`);
+      const otherViolations = interview.violationCount - interview.objectViolationCount - interview.focusLostCount;
+      console.log(`  Other violations: ${otherViolations} × 10 points = -${otherViolations * 10} points`);
+      console.log(`  Final score: ${interview.integrityScore}/100`);
 
       // Create PDF
       const doc = new PDFDocument({ margin: 50 });
@@ -208,6 +259,9 @@ class ReportGenerator {
 
         console.log('Adding violation analysis...');
         this.addViolationAnalysis(doc, violations);
+
+        console.log('Adding integrity score breakdown...');
+        this.addIntegrityScoreBreakdown(doc, interview);
 
         console.log('Adding violation details...');
         this.addViolationDetails(doc, violations);
@@ -290,7 +344,7 @@ class ReportGenerator {
       ['Interviewer:', interview.interviewerName || 'Unknown'],
       ['Start Time:', interview.startTime ? new Date(interview.startTime).toLocaleString() : 'N/A'],
       ['End Time:', interview.endTime ? new Date(interview.endTime).toLocaleString() : 'In Progress'],
-      ['Duration:', interview.duration ? `${interview.duration} minutes` : 'N/A'],
+      ['Duration:', this.calculateDuration(interview)],
       ['Status:', (interview.status || 'unknown').toUpperCase()],
       ['Integrity Score:', `${interview.integrityScore || 0}/100`],
       ['Total Violations:', interview.violationCount || 0],
@@ -347,7 +401,8 @@ class ReportGenerator {
         ['Email Address:', candidateEmail || interview.candidateEmail || 'N/A'],
         ['Session ID:', interview.sessionId || 'N/A'],
         ['Interview Date:', interview.startTime ? new Date(interview.startTime).toLocaleDateString() : 'N/A'],
-        ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A']
+        ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A'],
+        ['Duration:', this.calculateDuration(interview)]
       ];
 
       // Add candidate information
@@ -368,8 +423,17 @@ class ReportGenerator {
 
       // Calculate performance metrics
       const totalViolations = violations.length;
-      const focusViolations = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking')).length;
-      const objectViolations = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item')).length;
+      const focusViolations = violations.filter(v =>
+        v.type === 'face_not_detected' || v.type === 'no_face_detected' ||
+        v.type === 'multiple_faces' || v.type === 'multiple_faces_detected' ||
+        v.type === 'focus_lost' || v.type === 'looking_away' ||
+        v.type === 'absence' || v.type === 'eye_closure'
+      ).length;
+      const objectViolations = violations.filter(v =>
+        v.type === 'phone_detected' || v.type === 'book_detected' ||
+        v.type === 'device_detected' || v.type === 'notes_detected' ||
+        v.type === 'unauthorized_item' || v.type === 'unauthorized_item_detected'
+      ).length;
 
       // Calculate violation frequency per hour
       const durationHours = interview.duration ? interview.duration / 60 : 1; // Convert minutes to hours
@@ -630,8 +694,17 @@ class ReportGenerator {
     let y = currentY + 30;
 
     // Calculate detection statistics
-    const focusDetections = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking'));
-    const objectDetections = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item'));
+    const focusDetections = violations.filter(v =>
+      v.type === 'face_not_detected' || v.type === 'no_face_detected' ||
+      v.type === 'multiple_faces' || v.type === 'multiple_faces_detected' ||
+      v.type === 'focus_lost' || v.type === 'looking_away' ||
+      v.type === 'absence' || v.type === 'eye_closure'
+    );
+    const objectDetections = violations.filter(v =>
+      v.type === 'phone_detected' || v.type === 'book_detected' ||
+      v.type === 'device_detected' || v.type === 'notes_detected' ||
+      v.type === 'unauthorized_item' || v.type === 'unauthorized_item_detected'
+    );
 
     // Create statistics table
     const tableTop = y;
@@ -755,8 +828,17 @@ class ReportGenerator {
     let y = currentY + 30;
 
     // Analyze focus detections
-    const focusDetections = violations.filter(v => v.source === 'focus_detection' || v.type.includes('face') || v.type.includes('focus') || v.type.includes('looking'));
-    const objectDetections = violations.filter(v => v.source === 'object_detection' || v.type.includes('unauthorized') || v.type.includes('item'));
+    const focusDetections = violations.filter(v =>
+      v.type === 'face_not_detected' || v.type === 'no_face_detected' ||
+      v.type === 'multiple_faces' || v.type === 'multiple_faces_detected' ||
+      v.type === 'focus_lost' || v.type === 'looking_away' ||
+      v.type === 'absence' || v.type === 'eye_closure'
+    );
+    const objectDetections = violations.filter(v =>
+      v.type === 'phone_detected' || v.type === 'book_detected' ||
+      v.type === 'device_detected' || v.type === 'notes_detected' ||
+      v.type === 'unauthorized_item' || v.type === 'unauthorized_item_detected'
+    );
 
     // Focus Detection Analysis
     doc.fillColor('#000000')
@@ -1104,6 +1186,146 @@ class ReportGenerator {
     }
 
     return recommendations;
+  }
+
+  addIntegrityScoreBreakdown(doc, interview) {
+    const currentY = doc.y;
+
+    // Section title
+    doc.fontSize(16)
+      .fillColor('#2C3E50')
+      .text('INTEGRITY SCORE BREAKDOWN', 50, currentY);
+
+    doc.fontSize(12);
+    let y = currentY + 30;
+
+    // Calculate the breakdown
+    const baseScore = 100;
+    const focusDeduction = interview.focusLostCount * 5;
+    const objectDeduction = interview.objectViolationCount * 15;
+    const otherViolations = interview.violationCount - interview.objectViolationCount - interview.focusLostCount;
+    const otherDeduction = otherViolations * 10;
+    const finalScore = Math.max(0, baseScore - focusDeduction - objectDeduction - otherDeduction);
+
+    // Create breakdown table
+    doc.fillColor('#000000');
+
+    // Header
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('CALCULATION DETAILS:', 50, y);
+    y += 25;
+
+    // Base score
+    doc.fontSize(12)
+      .fillColor('#27AE60')
+      .text('Base Score:', 70, y)
+      .fillColor('#000000')
+      .text('100 points', 200, y);
+    y += 20;
+
+    // Deductions
+    if (interview.focusLostCount > 0) {
+      doc.fillColor('#E67E22')
+        .text('Focus Lost Violations:', 70, y)
+        .fillColor('#000000')
+        .text(`${interview.focusLostCount} × 5 points = -${focusDeduction} points`, 200, y);
+      y += 20;
+    }
+
+    if (interview.objectViolationCount > 0) {
+      doc.fillColor('#E74C3C')
+        .text('Object Violations:', 70, y)
+        .fillColor('#000000')
+        .text(`${interview.objectViolationCount} × 15 points = -${objectDeduction} points`, 200, y);
+      y += 20;
+    }
+
+    if (otherViolations > 0) {
+      doc.fillColor('#F39C12')
+        .text('Other Violations:', 70, y)
+        .fillColor('#000000')
+        .text(`${otherViolations} × 10 points = -${otherDeduction} points`, 200, y);
+      y += 20;
+    }
+
+    // Divider line
+    y += 10;
+    doc.strokeColor('#BDC3C7')
+      .lineWidth(1)
+      .moveTo(70, y)
+      .lineTo(400, y)
+      .stroke();
+    y += 15;
+
+    // Final score with color coding
+    let scoreColor = '#27AE60'; // Green for good scores
+    if (finalScore < 50) scoreColor = '#E74C3C'; // Red for poor scores
+    else if (finalScore < 75) scoreColor = '#F39C12'; // Orange for medium scores
+
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('Final Integrity Score:', 70, y)
+      .fillColor(scoreColor)
+      .font('Helvetica-Bold')
+      .text(`${finalScore}/100`, 250, y);
+
+    // Reset font
+    doc.font('Helvetica');
+    y += 30;
+
+    // Score interpretation
+    doc.fontSize(14)
+      .fillColor('#2C3E50')
+      .text('SCORE INTERPRETATION:', 50, y);
+    y += 25;
+
+    doc.fontSize(12)
+      .fillColor('#000000');
+
+    let interpretation = '';
+    let interpretationColor = '#000000';
+
+    if (finalScore >= 90) {
+      interpretation = 'EXCELLENT - Minimal or no violations detected';
+      interpretationColor = '#27AE60';
+    } else if (finalScore >= 75) {
+      interpretation = 'GOOD - Few violations detected';
+      interpretationColor = '#2ECC71';
+    } else if (finalScore >= 60) {
+      interpretation = 'FAIR - Moderate violations detected';
+      interpretationColor = '#F39C12';
+    } else if (finalScore >= 40) {
+      interpretation = 'POOR - Significant violations detected';
+      interpretationColor = '#E67E22';
+    } else {
+      interpretation = 'CRITICAL - Severe violations detected';
+      interpretationColor = '#E74C3C';
+    }
+
+    doc.fillColor(interpretationColor)
+      .text(interpretation, 70, y);
+    y += 25;
+
+    // Scoring system explanation
+    doc.fontSize(11)
+      .fillColor('#7F8C8D')
+      .text('Scoring System:', 70, y);
+    y += 18;
+
+    const scoringRules = [
+      '• Focus violations (looking away, no face detected): -5 points each',
+      '• Object violations (phone, books, devices): -15 points each',
+      '• Other violations: -10 points each',
+      '• Minimum score: 0 points'
+    ];
+
+    scoringRules.forEach(rule => {
+      doc.text(rule, 90, y);
+      y += 15;
+    });
+
+    doc.y = y + 20;
   }
 
   addViolationDetails(doc, violations) {
