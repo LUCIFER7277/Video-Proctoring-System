@@ -520,11 +520,21 @@ const InterviewerDashboard = () => {
     }));
 
     if (event.type === "unauthorized_item_detected") {
+      // Map object type to backend violation type
+      const mapObjectToViolationType = (item) => {
+        const itemLower = (item || '').toLowerCase();
+        if (itemLower.includes('phone') || itemLower.includes('cell')) return 'phone_detected';
+        if (itemLower.includes('book') || itemLower.includes('paper') || itemLower.includes('notes')) return 'book_detected';
+        if (itemLower.includes('laptop') || itemLower.includes('tablet') || itemLower.includes('monitor') ||
+            itemLower.includes('tv') || itemLower.includes('computer')) return 'device_detected';
+        return 'device_detected';
+      };
+
       const violation = {
         id: Date.now(),
-        type: "unauthorized_item",
-        description: event.message || "Unauthorized item detected",
-        severity: event.priority === "high" ? "critical" : event.priority === "medium" ? "high" : "medium",
+        type: mapObjectToViolationType(event.item),
+        description: event.message || `Unauthorized ${event.item || 'item'} detected`,
+        severity: event.priority === "high" ? "high" : event.priority === "medium" ? "medium" : "low",
         timestamp: new Date(),
         source: "object_detection",
         confidence: event.confidence || 0.8,

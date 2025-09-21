@@ -866,15 +866,26 @@ const CandidateRoom = () => {
 
           // Send violation to backend via socket
           if (socket && event.type === 'unauthorized_item_detected') {
+            // Map object type to backend violation type
+            const mapObjectToViolationType = (item) => {
+              const itemLower = (item || '').toLowerCase();
+              if (itemLower.includes('phone') || itemLower.includes('cell')) return 'phone_detected';
+              if (itemLower.includes('book') || itemLower.includes('paper') || itemLower.includes('notes')) return 'book_detected';
+              if (itemLower.includes('laptop') || itemLower.includes('tablet') || itemLower.includes('monitor') ||
+                  itemLower.includes('tv') || itemLower.includes('computer')) return 'device_detected';
+              return 'device_detected';
+            };
+
+            const violationType = mapObjectToViolationType(event.item);
             socket.emit('violation-detected', {
               sessionId,
-              violationType: 'unauthorized_object',
+              violationType: violationType,
               violationData: {
-                type: 'unauthorized_object',
+                type: violationType,
                 itemType: event.itemType,
                 confidence: event.confidence,
                 priority: event.priority,
-                message: event.message,
+                description: event.message || `Unauthorized ${event.item || 'item'} detected`,
                 timestamp: event.timestamp,
                 coordinates: event.coordinates,
                 severity: event.priority

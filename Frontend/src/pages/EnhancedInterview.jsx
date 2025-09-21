@@ -551,11 +551,22 @@ const EnhancedInterview = () => {
 
       // Handle unauthorized item detection
       if (event.type === "unauthorized_item_detected") {
+        // Map object type to backend violation type
+        const mapObjectToViolationType = (item) => {
+          const itemLower = (item || '').toLowerCase();
+          if (itemLower.includes('phone') || itemLower.includes('cell')) return 'phone_detected';
+          if (itemLower.includes('book') || itemLower.includes('paper') || itemLower.includes('notes')) return 'book_detected';
+          if (itemLower.includes('laptop') || itemLower.includes('tablet') || itemLower.includes('monitor') ||
+              itemLower.includes('tv') || itemLower.includes('computer')) return 'device_detected';
+          return 'device_detected';
+        };
+
         handleViolation({
-          type: "unauthorized_item",
-          description: event.message,
-          severity: event.priority === "high" ? "violation" : "warning",
+          type: mapObjectToViolationType(event.item),
+          description: event.message || `Unauthorized ${event.item || 'item'} detected`,
+          severity: event.priority === "high" ? "high" : "medium",
           source: "object_detection",
+          confidence: event.confidence || 0.8,
           data: event,
         });
 

@@ -283,14 +283,16 @@ class AIDetectionService {
           if (prediction.score >= this.settings.confidenceThreshold) {
             objectResults.unauthorized.push(objectData);
 
-            // Create violation
+            // Create violation with proper type mapping
+            const violationType = this.mapObjectToViolationType(prediction.class);
             const violation = {
-              type: 'unauthorized_item',
+              type: violationType,
               item: prediction.class,
               confidence: prediction.score,
               timestamp: new Date(),
               bbox: prediction.bbox,
-              severity: this.getViolationSeverity(prediction.class)
+              severity: this.getViolationSeverity(prediction.class),
+              description: `Unauthorized ${prediction.class} detected in frame`
             };
 
             objectResults.violations.push(violation);
@@ -423,7 +425,8 @@ class AIDetectionService {
           timestamp: new Date(),
           duration: currentTime - this.state.lastFaceDetection,
           severity: 'high',
-          message: 'No face detected for extended period'
+          description: 'No face detected for extended period',
+          confidence: 0.9
         });
       }
     } else if (faceResults.count > 1) {
@@ -434,7 +437,8 @@ class AIDetectionService {
         timestamp: new Date(),
         count: faceResults.count,
         severity: 'high',
-        message: `${faceResults.count} faces detected`
+        description: `${faceResults.count} faces detected in frame`,
+        confidence: 0.95
       });
     } else {
       // Single face - check gaze
@@ -451,7 +455,8 @@ class AIDetectionService {
             duration: currentTime - this.state.lastLookingAwayStart,
             direction: face.gazeDirection,
             severity: 'medium',
-            message: `Looking ${face.gazeDirection} for ${Math.round((currentTime - this.state.lastLookingAwayStart) / 1000)} seconds`
+            description: `Looking ${face.gazeDirection} for ${Math.round((currentTime - this.state.lastLookingAwayStart) / 1000)} seconds`,
+            confidence: 0.8
           });
         }
       } else {
@@ -633,6 +638,30 @@ class AIDetectionService {
       return 'medium';
     }
     return 'low';
+  }
+
+  mapObjectToViolationType(itemClass) {
+    // Map detected objects to backend violation types
+    const itemLower = itemClass.toLowerCase();
+
+    // Phone-related items
+    if (itemLower.includes('phone') || itemLower.includes('cell')) {
+      return 'phone_detected';
+    }
+
+    // Book/reading materials
+    if (itemLower.includes('book') || itemLower.includes('paper') || itemLower.includes('notes')) {
+      return 'book_detected';
+    }
+
+    // Electronic devices
+    if (itemLower.includes('laptop') || itemLower.includes('tablet') || itemLower.includes('monitor') ||
+        itemLower.includes('tv') || itemLower.includes('computer')) {
+      return 'device_detected';
+    }
+
+    // Default to device_detected for other unauthorized items
+    return 'device_detected';
   }
 
   updateStatistics(faceResults, objectResults) {
