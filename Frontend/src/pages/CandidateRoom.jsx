@@ -103,8 +103,6 @@ const CandidateRoom = () => {
   const remoteVideoRef = useRef(null);
   const webrtcServiceRef = useRef(null);
   const chatRef = useRef(null);
-  const focusCanvasRef = useRef(null);
-  const objectCanvasRef = useRef(null);
   const focusServiceRef = useRef(new FocusDetectionService());
   const objectServiceRef = useRef(new ObjectDetectionService());
 
@@ -802,9 +800,9 @@ const CandidateRoom = () => {
 
       console.log("🔍 Initializing detection services...");
 
-      // Initialize focus detection
+      // Initialize focus detection (no canvas for visual overlay)
       if (focusServiceRef.current && !focusServiceRef.current.isInitialized) {
-        await focusServiceRef.current.initialize(localVideoRef.current, focusCanvasRef.current);
+        await focusServiceRef.current.initialize(localVideoRef.current, null);
 
         // Set up focus detection event listeners
         focusServiceRef.current.addEventListener((event) => {
@@ -833,9 +831,9 @@ const CandidateRoom = () => {
         console.log("✅ Focus detection service initialized");
       }
 
-      // Initialize object detection
+      // Initialize object detection (no canvas for visual overlay)
       if (objectServiceRef.current && !objectServiceRef.current.isInitialized) {
-        await objectServiceRef.current.initialize(localVideoRef.current, objectCanvasRef.current);
+        await objectServiceRef.current.initialize(localVideoRef.current, null);
 
         // Set up object detection event listeners
         objectServiceRef.current.addEventListener((event) => {
@@ -1519,38 +1517,6 @@ const CandidateRoom = () => {
                   onCanPlay={() => {
                     console.log("✅ Local video can play");
                   }}
-                />
-                {/* Detection Canvas Overlays */}
-                <canvas
-                  ref={focusCanvasRef}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    pointerEvents: 'none',
-                    transform: 'scaleX(-1)', // Mirror to match video
-                    zIndex: 1
-                  }}
-                  width="240"
-                  height="180"
-                />
-                <canvas
-                  ref={objectCanvasRef}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    pointerEvents: 'none',
-                    transform: 'scaleX(-1)', // Mirror to match video
-                    opacity: 0.8,
-                    zIndex: 2
-                  }}
-                  width="240"
-                  height="180"
                 />
               </>
             ) : (
