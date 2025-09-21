@@ -16,6 +16,20 @@ class ReportGenerator {
     }
   }
 
+  async getViolationSummaryBySessionId(sessionId) {
+    return await Violation.aggregate([
+      { $match: { sessionId: sessionId } },
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 },
+          avgConfidence: { $avg: '$confidence' },
+          totalDuration: { $sum: '$duration' }
+        }
+      }
+    ]);
+  }
+
   async generateInterviewReport(interviewId) {
     try {
       console.log('Starting report generation for interview:', interviewId);
@@ -28,12 +42,47 @@ class ReportGenerator {
 
       console.log('Interview found:', interview.candidateName);
 
-      // Fetch violations
-      const violations = await Violation.find({ interviewId }).sort({ timestamp: 1 });
-      const violationSummary = await Violation.getViolationSummary(interviewId);
+      // Fetch violations using both interviewId and sessionId for better compatibility
+      let violations = await Violation.find({ interviewId }).sort({ timestamp: 1 });
+
+      // If no violations found by interviewId, try sessionId
+      if (violations.length === 0) {
+        violations = await Violation.find({ sessionId: interview.sessionId }).sort({ timestamp: 1 });
+      }
+
+      // Get violation summary - try both methods
+      let violationSummary = await Violation.getViolationSummary(interviewId);
+
+      // If no summary from interviewId, try with sessionId
+      if (violationSummary.length === 0) {
+        violationSummary = await this.getViolationSummaryBySessionId(interview.sessionId);
+      }
 
       console.log('Violations found:', violations.length);
       console.log('Violation summary:', violationSummary.length);
+
+      // Debug: Log actual violation data
+      if (violations.length > 0) {
+        console.log('Sample violation types:', violations.slice(0, 3).map(v => ({
+          type: v.type,
+          severity: v.severity,
+          confidence: v.confidence,
+          timestamp: v.timestamp
+        })));
+      }
+
+      // Debug: Log violation summary data
+      if (violationSummary.length > 0) {
+        console.log('Violation summary data:', violationSummary);
+      }
+
+      // Debug: Log interview statistics
+      console.log('Interview statistics:', {
+        violationCount: interview.violationCount,
+        focusLostCount: interview.focusLostCount,
+        objectViolationCount: interview.objectViolationCount,
+        integrityScore: interview.integrityScore
+      });
 
       // Create PDF
       const doc = new PDFDocument({ margin: 50 });

@@ -123,21 +123,13 @@ const InterviewerDashboard = () => {
   // Ensure video elements get streams when refs are available
   useEffect(() => {
     if (localStream && localVideoRef.current) {
-      console.log("🎥 DEBUG: Setting local video source...");
-      console.log("🎥 DEBUG: Local stream ID:", localStream.id);
-      console.log("🎥 DEBUG: Local stream tracks:", localStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
       localVideoRef.current.srcObject = localStream;
-      console.log("🎥 DEBUG: Local video element srcObject set:", localVideoRef.current.srcObject?.id);
     }
   }, [localStream]);
 
   useEffect(() => {
     if (remoteStream && remoteVideoRef.current) {
-      console.log("📺 DEBUG: Setting remote video source...");
-      console.log("📺 DEBUG: Remote stream ID:", remoteStream.id);
-      console.log("📺 DEBUG: Remote stream tracks:", remoteStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
       remoteVideoRef.current.srcObject = remoteStream;
-      console.log("📺 DEBUG: Remote video element srcObject set:", remoteVideoRef.current.srcObject?.id);
     }
   }, [remoteStream]);
 
@@ -283,9 +275,6 @@ const InterviewerDashboard = () => {
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
-        console.log("🎥 DEBUG: Set local video srcObject in initializeLocalStream");
-        console.log("🎥 DEBUG: Stream ID:", stream.id);
-        console.log("🎥 DEBUG: Video element:", localVideoRef.current);
       }
 
       console.log("Interviewer local stream initialized successfully");
@@ -320,57 +309,9 @@ const InterviewerDashboard = () => {
       // Set up event handlers
       service.onRemoteStream = (candidateStream) => {
         console.log("📹 INTERVIEWER: Received candidate stream");
-        console.log("📺 DEBUG: Candidate stream ID:", candidateStream.id);
-        console.log("📺 DEBUG: Candidate stream tracks:", candidateStream.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
-
-        // Detailed track analysis
-        const videoTracks = candidateStream.getVideoTracks();
-        const audioTracks = candidateStream.getAudioTracks();
-        console.log("📺 DEBUG: Video tracks count:", videoTracks.length);
-        console.log("📺 DEBUG: Audio tracks count:", audioTracks.length);
-
-        videoTracks.forEach((track, i) => {
-          console.log(`📺 DEBUG: Video track ${i}:`, {
-            id: track.id,
-            kind: track.kind,
-            enabled: track.enabled,
-            readyState: track.readyState,
-            label: track.label,
-            muted: track.muted
-          });
-        });
-
-        console.log("📺 DEBUG: Current local stream ID for comparison:", localStream?.id);
-        console.log("📺 DEBUG: Are streams the same?", candidateStream.id === localStream?.id);
-
         setRemoteStream(candidateStream);
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = candidateStream;
-          console.log("📺 DEBUG: Remote video element srcObject set:", remoteVideoRef.current.srcObject?.id);
-
-          // Force video element to load and play
-          remoteVideoRef.current.load();
-          remoteVideoRef.current.onloadedmetadata = () => {
-            console.log("📺 DEBUG: Remote video metadata loaded:", {
-              videoWidth: remoteVideoRef.current.videoWidth,
-              videoHeight: remoteVideoRef.current.videoHeight,
-              duration: remoteVideoRef.current.duration,
-              readyState: remoteVideoRef.current.readyState
-            });
-          };
-
-          // Force video to display by triggering a manual play
-          setTimeout(() => {
-            if (remoteVideoRef.current) {
-              console.log("📺 FORCE PLAY: Attempting to force remote video play");
-              remoteVideoRef.current.play().then(() => {
-                console.log("📺 FORCE PLAY: Remote video play successful");
-              }).catch((e) => {
-                console.error("📺 FORCE PLAY: Remote video play failed:", e);
-              });
-            }
-          }, 1000);
-
           try {
             remoteVideoRef.current.muted = false;
           } catch {}
@@ -380,7 +321,6 @@ const InterviewerDashboard = () => {
               e?.message
             );
           });
-          console.log("📹 Set remote video srcObject successfully");
         }
 
         // Start AI detection on candidate stream
@@ -407,12 +347,9 @@ const InterviewerDashboard = () => {
 
       // Get local stream and set it to video element
       const stream = service.localStream;
-      console.log("🎥 DEBUG: Getting stream from WebRTC service:", stream?.id);
-      console.log("🎥 DEBUG: Service local stream tracks:", stream?.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`));
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
-        console.log("🎥 DEBUG: Set local video from service stream");
       }
 
       // Create peer connection
@@ -738,58 +675,6 @@ const InterviewerDashboard = () => {
     }
   };
 
-  // Debug function to check video elements periodically
-  const debugVideoElements = () => {
-    console.log("🔍 DEBUG: Video Elements Status:");
-
-    // Local video element
-    const localVideoElement = localVideoRef.current;
-    console.log("🔍 Local Video Element:", {
-      exists: !!localVideoElement,
-      srcObject: localVideoElement?.srcObject?.id,
-      tracks: localVideoElement?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
-      playing: !localVideoElement?.paused,
-      readyState: localVideoElement?.readyState,
-      videoWidth: localVideoElement?.videoWidth,
-      videoHeight: localVideoElement?.videoHeight,
-      currentTime: localVideoElement?.currentTime
-    });
-
-    // Remote video element
-    const remoteVideoElement = remoteVideoRef.current;
-    console.log("🔍 Remote Video Element:", {
-      exists: !!remoteVideoElement,
-      srcObject: remoteVideoElement?.srcObject?.id,
-      tracks: remoteVideoElement?.srcObject?.getTracks().map(t => `${t.kind}:${t.id}`) || [],
-      playing: !remoteVideoElement?.paused,
-      readyState: remoteVideoElement?.readyState,
-      videoWidth: remoteVideoElement?.videoWidth,
-      videoHeight: remoteVideoElement?.videoHeight,
-      currentTime: remoteVideoElement?.currentTime
-    });
-
-    // Stream states
-    console.log("🔍 State Streams:", {
-      localStreamId: localStream?.id,
-      localStreamTracks: localStream?.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`) || [],
-      remoteStreamId: remoteStream?.id,
-      remoteStreamTracks: remoteStream?.getTracks().map(t => `${t.kind}:${t.id}:${t.enabled}`) || [],
-      streamsAreSame: localStream?.id === remoteStream?.id
-    });
-
-    // Check if video elements are actually showing different streams
-    console.log("🔍 Video Element Source Comparison:", {
-      localVideoSrcId: localVideoElement?.srcObject?.id,
-      remoteVideoSrcId: remoteVideoElement?.srcObject?.id,
-      videoElementsShowSameStream: localVideoElement?.srcObject?.id === remoteVideoElement?.srcObject?.id
-    });
-  };
-
-  // Add debug interval
-  useEffect(() => {
-    const debugInterval = setInterval(debugVideoElements, 10000); // Every 10 seconds
-    return () => clearInterval(debugInterval);
-  }, [localStream, remoteStream]);
 
   const cleanup = () => {
     if (webrtcServiceRef.current) {
@@ -1375,17 +1260,6 @@ const InterviewerDashboard = () => {
                       style={styles.video}
                       autoPlay
                       playsInline
-                      controls={false}
-                      muted={false}
-                      onLoadedMetadata={() => {
-                        console.log("📺 FIXED: Remote video metadata loaded");
-                        console.log("📺 FIXED: Video dimensions:", {
-                          width: remoteVideoRef.current?.videoWidth,
-                          height: remoteVideoRef.current?.videoHeight
-                        });
-                      }}
-                      onPlay={() => console.log("📺 FIXED: Remote video started playing")}
-                      onError={(e) => console.error("📺 FIXED: Remote video error:", e)}
                     />
                     <canvas
                       ref={detectionCanvasRef}
@@ -1537,19 +1411,6 @@ const InterviewerDashboard = () => {
                 onClick={endSession}
               >
                 End Session
-              </button>
-            </div>
-            <div style={{ ...styles.controlButtons, marginTop: '12px' }}>
-              <button
-                style={{
-                  ...styles.button,
-                  background: "linear-gradient(135deg, #f97316, #ea580c)",
-                  color: "white",
-                  boxShadow: "0 4px 15px rgba(249, 115, 22, 0.4)"
-                }}
-                onClick={debugVideoElements}
-              >
-                🔍 Debug Video Streams
               </button>
             </div>
           </div>

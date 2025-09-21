@@ -65,7 +65,10 @@ const ReportView = () => {
     try {
       setGenerating(true);
 
-      const response = await axios.post(`${API_BASE_URL}/reports/generate/${interview._id}`);
+      // Use sessionId for report generation (backend will find by sessionId)
+      console.log('Generating report for sessionId:', sessionId);
+
+      const response = await axios.post(`${API_BASE_URL}/reports/generate/${sessionId}`);
 
       if (response.data.success) {
         setReportUrl(response.data.downloadUrl);
@@ -80,16 +83,19 @@ const ReportView = () => {
 
     } catch (error) {
       console.error('Error generating report:', error);
+      console.error('Full error response:', error.response?.data);
 
       // Provide more specific error messages for report generation
       if (error.response?.status === 404) {
         setError('Interview not found. Cannot generate report for non-existent interview.');
       } else if (error.response?.status === 500) {
-        setError('Server error while generating report. Please try again later.');
+        const serverError = error.response?.data?.error || 'Unknown server error';
+        setError(`Server error while generating report: ${serverError}`);
       } else if (error.message.includes('Network Error')) {
         setError('Connection failed while generating report. Please check your internet connection.');
       } else {
-        setError('Failed to generate report. Please try again.');
+        const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+        setError(`Failed to generate report: ${errorMsg}`);
       }
     } finally {
       setGenerating(false);

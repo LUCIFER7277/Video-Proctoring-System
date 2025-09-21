@@ -49,10 +49,15 @@ const generateInterviewReport = async (req, res) => {
 
     console.log('Report generation request received for interviewId:', interviewId);
 
-    // Validate interview exists
-    const interview = await Interview.findById(interviewId);
+    // Validate interview exists - try both MongoDB _id and sessionId
+    let interview = await Interview.findById(interviewId);
     if (!interview) {
-      console.log('Interview not found for ID:', interviewId);
+      // Try finding by sessionId if _id lookup failed
+      interview = await Interview.findOne({ sessionId: interviewId });
+    }
+
+    if (!interview) {
+      console.log('Interview not found for ID/sessionId:', interviewId);
       return res.status(404).json({
         success: false,
         message: 'Interview not found'
@@ -72,8 +77,8 @@ const generateInterviewReport = async (req, res) => {
       objectViolationCount: interview.objectViolationCount
     });
 
-    // Generate report
-    const result = await reportGenerator.generateInterviewReport(interviewId);
+    // Generate report using the MongoDB _id
+    const result = await reportGenerator.generateInterviewReport(interview._id);
 
     if (result.success) {
       console.log('Report generated successfully:', result.filename);

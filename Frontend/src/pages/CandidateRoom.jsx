@@ -5,6 +5,10 @@ import io from "socket.io-client";
 // Import Professional WebRTC Service
 import ProfessionalWebRTCService from "../services/professionalWebRTCService";
 
+// Import Detection Services
+import FocusDetectionService from "../services/focusDetectionService";
+import ObjectDetectionService from "../services/objectDetectionService";
+
 // Professional CSS animations
 const animations = `
   @keyframes fadeInUp {
@@ -99,6 +103,10 @@ const CandidateRoom = () => {
   const remoteVideoRef = useRef(null);
   const webrtcServiceRef = useRef(null);
   const chatRef = useRef(null);
+  const focusCanvasRef = useRef(null);
+  const objectCanvasRef = useRef(null);
+  const focusServiceRef = useRef(new FocusDetectionService());
+  const objectServiceRef = useRef(new ObjectDetectionService());
 
   // Initialize Professional WebRTC Service
   useEffect(() => {
@@ -106,6 +114,13 @@ const CandidateRoom = () => {
     return () => {
       if (webrtcServiceRef.current) {
         webrtcServiceRef.current.cleanup();
+      }
+      // Cleanup detection services
+      if (focusServiceRef.current) {
+        focusServiceRef.current.stop();
+      }
+      if (objectServiceRef.current) {
+        objectServiceRef.current.stop();
       }
     };
   }, []);
@@ -481,35 +496,8 @@ const CandidateRoom = () => {
 
       // Get local stream and set it to video element
       const stream = service.localStream;
-      console.log("📹 CANDIDATE DEBUG: Local stream from service:", stream ? "Available" : "Not available");
 
       if (stream) {
-        console.log("📊 CANDIDATE DEBUG: Stream details:", {
-          id: stream.id,
-          active: stream.active,
-          tracks: stream.getTracks().map(t => ({
-            kind: t.kind,
-            enabled: t.enabled,
-            readyState: t.readyState,
-            id: t.id
-          }))
-        });
-
-        // Check video tracks specifically
-        const videoTracks = stream.getVideoTracks();
-        console.log("📹 CANDIDATE DEBUG: Video tracks count:", videoTracks.length);
-        videoTracks.forEach((track, i) => {
-          console.log(`📹 CANDIDATE DEBUG: Video track ${i}:`, {
-            id: track.id,
-            kind: track.kind,
-            enabled: track.enabled,
-            readyState: track.readyState,
-            label: track.label,
-            muted: track.muted,
-            constraints: track.getConstraints(),
-            settings: track.getSettings()
-          });
-        });
         
         setLocalStream(stream);
         if (localVideoRef.current) {
@@ -724,6 +712,15 @@ const CandidateRoom = () => {
     if (webrtcServiceRef.current) {
       webrtcServiceRef.current.cleanup();
     }
+
+    // Cleanup detection services
+    if (focusServiceRef.current) {
+      focusServiceRef.current.stop();
+    }
+    if (objectServiceRef.current) {
+      objectServiceRef.current.stop();
+    }
+
     if (socket) {
       socket.disconnect();
     }
@@ -784,13 +781,98 @@ const CandidateRoom = () => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
       console.log("✅ Video element updated with new stream");
-      
+
       // Ensure video plays
       localVideoRef.current.play().catch(error => {
         console.warn("Video autoplay failed:", error);
       });
+
+      // Initialize detection services when video is ready
+      initializeDetectionServices();
     }
   }, [localStream]);
+
+  // Initialize detection services
+  const initializeDetectionServices = async () => {
+    try {
+      if (!localVideoRef.current || !localStream) {
+        console.log("⏳ Waiting for video stream to initialize detection services");
+        return;
+      }
+
+      console.log("🔍 Initializing detection services...");
+
+      // Initialize focus detection
+      if (focusServiceRef.current && !focusServiceRef.current.isInitialized) {
+        await focusServiceRef.current.initialize(localVideoRef.current, focusCanvasRef.current);
+
+        // Set up focus detection event listeners
+        focusServiceRef.current.addEventListener((event) => {
+          console.log("👁️ Focus detection event:", event);
+
+          // Send violation to backend via socket
+          if (socket && event.type !== 'focus_restored' && event.type !== 'single_face_restored') {
+            socket.emit('violation-detected', {
+              sessionId,
+              violationType: event.type,
+              violationData: {
+                type: event.type,
+                message: event.message,
+                timestamp: event.timestamp,
+                severity: event.type === 'multiple_faces_detected' ? 'high' :
+                         event.type === 'no_face_detected' ? 'high' : 'medium'
+              }
+            });
+          }
+
+          // Show notification to candidate
+          const notificationType = event.type.includes('detected') ? 'warning' : 'info';
+          addNotification(`Focus Detection: ${event.message}`, notificationType);
+        });
+
+        console.log("✅ Focus detection service initialized");
+      }
+
+      // Initialize object detection
+      if (objectServiceRef.current && !objectServiceRef.current.isInitialized) {
+        await objectServiceRef.current.initialize(localVideoRef.current, objectCanvasRef.current);
+
+        // Set up object detection event listeners
+        objectServiceRef.current.addEventListener((event) => {
+          console.log("📦 Object detection event:", event);
+
+          // Send violation to backend via socket
+          if (socket && event.type === 'unauthorized_item_detected') {
+            socket.emit('violation-detected', {
+              sessionId,
+              violationType: 'unauthorized_object',
+              violationData: {
+                type: 'unauthorized_object',
+                itemType: event.itemType,
+                confidence: event.confidence,
+                priority: event.priority,
+                message: event.message,
+                timestamp: event.timestamp,
+                coordinates: event.coordinates,
+                severity: event.priority
+              }
+            });
+          }
+
+          // Show notification to candidate
+          addNotification(`Object Detection: ${event.message}`, 'warning');
+        });
+
+        console.log("✅ Object detection service initialized");
+      }
+
+      addNotification("Detection monitoring is now active", "success");
+
+    } catch (error) {
+      console.error("❌ Failed to initialize detection services:", error);
+      addNotification("Failed to initialize detection monitoring", "error");
+    }
+  };
 
   const addNotification = (message, type = "info") => {
     const notification = {
@@ -1329,6 +1411,18 @@ const CandidateRoom = () => {
                 {webrtcServiceRef.current?.isInitialized ? "Initialized" : "Not Initialized"}
               </span>
             </div>
+            <div style={styles.infoItem}>
+              <span style={styles.infoLabel}>Focus Detection:</span>
+              <span style={styles.infoValue}>
+                {focusServiceRef.current?.isInitialized ? "Active" : "Inactive"}
+              </span>
+            </div>
+            <div style={styles.infoItem}>
+              <span style={styles.infoLabel}>Object Detection:</span>
+              <span style={styles.infoValue}>
+                {objectServiceRef.current?.isInitialized ? "Active" : "Inactive"}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1408,23 +1502,57 @@ const CandidateRoom = () => {
             !isVideoMuted &&
             localStream.getVideoTracks().length > 0 &&
             localStream.getVideoTracks()[0].readyState === "live" ? (
-              <video
-                ref={localVideoRef}
-                style={styles.localVideo}
-                autoPlay
-                muted
-                playsInline
-                onLoadedMetadata={() => {
-                  console.log("✅ Local video loaded successfully");
-                }}
-                onError={(e) => {
-                  console.error("❌ Local video error:", e);
-                  addNotification("Video display error", "error");
-                }}
-                onCanPlay={() => {
-                  console.log("✅ Local video can play");
-                }}
-              />
+              <>
+                <video
+                  ref={localVideoRef}
+                  style={styles.localVideo}
+                  autoPlay
+                  muted
+                  playsInline
+                  onLoadedMetadata={() => {
+                    console.log("✅ Local video loaded successfully");
+                  }}
+                  onError={(e) => {
+                    console.error("❌ Local video error:", e);
+                    addNotification("Video display error", "error");
+                  }}
+                  onCanPlay={() => {
+                    console.log("✅ Local video can play");
+                  }}
+                />
+                {/* Detection Canvas Overlays */}
+                <canvas
+                  ref={focusCanvasRef}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                    transform: 'scaleX(-1)', // Mirror to match video
+                    zIndex: 1
+                  }}
+                  width="240"
+                  height="180"
+                />
+                <canvas
+                  ref={objectCanvasRef}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                    transform: 'scaleX(-1)', // Mirror to match video
+                    opacity: 0.8,
+                    zIndex: 2
+                  }}
+                  width="240"
+                  height="180"
+                />
+              </>
             ) : (
               <div style={styles.noVideo}>
                 <div style={{ fontSize: "24px", marginBottom: "8px" }}>📷</div>
