@@ -80,16 +80,42 @@ const Login = () => {
           return;
         }
 
-        // Validate session exists
+        // Validate session exists and update candidate information
         try {
           const validateResponse = await axios.get(`${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}`);
           if (!validateResponse.data.success) {
             throw new Error('Session not found');
           }
           console.log('Session validated successfully');
+
+          // Update candidate information in the interview record
+          const candidateUpdateData = {
+            candidateName: formData.name,
+            candidateEmail: formData.email
+          };
+
+          console.log('Updating candidate information:', candidateUpdateData);
+          const updateResponse = await axios.put(
+            `${import.meta.env.VITE_API_URL || 'https://video-proctoring-system-0i3w.onrender.com/api'}/interviews/${sessionId}/candidate`,
+            candidateUpdateData
+          );
+
+          if (!updateResponse.data.success) {
+            console.error('Failed to update candidate info:', updateResponse.data);
+            throw new Error('Failed to update candidate information');
+          }
+
+          console.log('Candidate information updated successfully:', updateResponse.data);
+          setSuccess(`Joined session successfully! Your information has been updated.`);
+
         } catch (validateError) {
-          console.error('Session validation failed:', validateError);
-          setError('Invalid session ID. Please check the session ID provided by your interviewer.');
+          console.error('Session validation or update failed:', validateError);
+
+          if (validateError.message.includes('Failed to update candidate information')) {
+            setError('Failed to update your information in the session. Please try again.');
+          } else {
+            setError('Invalid session ID. Please check the session ID provided by your interviewer.');
+          }
           return;
         }
       }

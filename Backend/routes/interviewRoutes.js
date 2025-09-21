@@ -6,6 +6,7 @@ const {
   endInterview,
   getInterview,
   uploadRecording,
+  updateCandidateInfo,
   getAllInterviews
 } = require('../controllers/interviewController.js');
 const PDFService = require('../services/pdfService.js');
@@ -24,6 +25,7 @@ router.get('/', getAllInterviews);
 router.get('/:sessionId', getInterview);
 router.post('/:sessionId/start', startInterview);
 router.post('/:sessionId/end', endInterview);
+router.put('/:sessionId/candidate', updateCandidateInfo);
 router.post('/:sessionId/upload', upload.single('video'), uploadRecording);
 
 

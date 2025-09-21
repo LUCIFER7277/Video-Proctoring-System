@@ -110,8 +110,76 @@ const configureSocket = (server) => {
     });
 
     // Monitoring events
-    socket.on('violation-detected', (data) => {
+    socket.on('violation-detected', async (data) => {
       console.log('Violation detected:', data);
+
+      try {
+        // Save violation to database
+        const Violation = require('../models/Violation');
+        const Interview = require('../models/Interview');
+
+        // Find the interview
+        const interview = await Interview.findOne({ sessionId: data.sessionId });
+        if (!interview) {
+          console.error('Interview not found for sessionId:', data.sessionId);
+          return;
+        }
+
+        // Extract violation data with proper mapping
+        const violationData = data.violationData || data;
+
+        // Create violation record
+        const violation = new Violation({
+          interviewId: interview._id,
+          sessionId: data.sessionId,
+          type: data.violationType || violationData.type || 'unknown',
+          description: violationData.message || violationData.description || 'No description provided',
+          confidence: violationData.confidence || 0.5,
+          timestamp: violationData.timestamp ? new Date(violationData.timestamp) : new Date(),
+          duration: violationData.duration || 0,
+          severity: violationData.severity || 'medium',
+          source: 'candidate_detection',
+          metadata: {
+            detectionSource: 'candidate_side',
+            detectionLocation: 'candidate_side',
+            candidateInfo: interview.candidateName,
+            violationType: data.violationType,
+            originalData: violationData
+          }
+        });
+
+        await violation.save();
+        console.log('✅ Violation saved to database:', violation._id);
+
+        // Update interview counts
+        const violationCount = await Violation.countDocuments({ sessionId: data.sessionId });
+        const focusLostCount = await Violation.countDocuments({
+          sessionId: data.sessionId,
+          type: { $in: ['focus_lost', 'looking_away', 'no_face_detected', 'multiple_faces_detected'] }
+        });
+        const objectViolations = await Violation.countDocuments({
+          sessionId: data.sessionId,
+          type: { $in: ['unauthorized_item', 'unauthorized_object', 'phone_detected', 'book_detected', 'notes_detected', 'device_detected'] }
+        });
+
+        interview.violationCount = violationCount;
+        interview.focusLostCount = focusLostCount;
+        interview.objectViolationCount = objectViolations;
+        interview.calculateIntegrityScore();
+        await interview.save();
+
+        console.log('📊 Interview stats updated:', {
+          violationCount,
+          focusLostCount,
+          objectViolations,
+          integrityScore: interview.integrityScore
+        });
+
+      } catch (error) {
+        console.error('❌ Error saving violation to database:', error);
+      }
+
+      // Relay to interviewer dashboard
       socket.to(data.sessionId).emit('real-time-violation', data);
     });
 

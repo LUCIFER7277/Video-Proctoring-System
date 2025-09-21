@@ -202,6 +202,56 @@ const uploadRecording = async (req, res) => {
   }
 };
 
+const updateCandidateInfo = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { candidateName, candidateEmail } = req.body;
+
+    console.log('Updating candidate info for sessionId:', sessionId);
+    console.log('New candidate info:', { candidateName, candidateEmail });
+
+    const interview = await Interview.findOne({ sessionId });
+    if (!interview) {
+      return res.status(404).json({
+        success: false,
+        message: 'Interview session not found'
+      });
+    }
+
+    // Update candidate information
+    interview.candidateName = candidateName;
+    interview.candidateEmail = candidateEmail;
+
+    // Transition to in_progress status when candidate joins
+    if (interview.status === 'scheduled') {
+      interview.status = 'in_progress';
+      interview.startTime = new Date();
+    }
+
+    await interview.save();
+
+    console.log('Candidate info updated successfully:', {
+      sessionId,
+      candidateName: interview.candidateName,
+      candidateEmail: interview.candidateEmail,
+      status: interview.status
+    });
+
+    res.json({
+      success: true,
+      message: 'Candidate information updated successfully',
+      data: interview
+    });
+  } catch (error) {
+    console.error('Error updating candidate info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update candidate information',
+      error: error.message
+    });
+  }
+};
+
 const getAllInterviews = async (req, res) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
@@ -242,5 +292,6 @@ module.exports = {
   endInterview,
   getInterview,
   uploadRecording,
+  updateCandidateInfo,
   getAllInterviews
 };

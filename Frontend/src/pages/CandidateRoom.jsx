@@ -699,8 +699,33 @@ const CandidateRoom = () => {
     }
   };
 
-  const leaveSession = () => {
+  const leaveSession = async () => {
     if (window.confirm("Are you sure you want to leave the interview?")) {
+      try {
+        // End the interview session
+        console.log('🔚 Ending interview session:', sessionId);
+        const apiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/interviews/${sessionId}/end`;
+
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          console.log('✅ Interview ended successfully:', data);
+          addNotification("Interview session ended successfully", "info");
+        } else {
+          console.error('❌ Failed to end interview:', data.message);
+          addNotification("Failed to end interview properly", "warning");
+        }
+      } catch (error) {
+        console.error('❌ Error ending interview:', error);
+        addNotification("Error ending interview session", "error");
+      }
+
       cleanup();
       navigate("/");
     }

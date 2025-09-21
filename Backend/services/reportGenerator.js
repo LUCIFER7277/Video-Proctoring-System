@@ -1137,23 +1137,31 @@ class ReportGenerator {
   }
 
   addFooter(doc) {
-    const pageCount = doc.bufferedPageRange().count;
+    try {
+      const range = doc.bufferedPageRange();
+      const startPage = range.start;
+      const pageCount = range.count;
 
-    for (let i = 0; i < pageCount; i++) {
-      doc.switchToPage(i);
+      for (let i = 0; i < pageCount; i++) {
+        const pageIndex = startPage + i;
+        doc.switchToPage(pageIndex);
 
-      // Footer line
-      doc.strokeColor('#BDC3C7')
-        .lineWidth(1)
-        .moveTo(50, 750)
-        .lineTo(545, 750)
-        .stroke();
+        // Footer line
+        doc.strokeColor('#BDC3C7')
+          .lineWidth(1)
+          .moveTo(50, 750)
+          .lineTo(545, 750)
+          .stroke();
 
-      // Footer text
-      doc.fontSize(8)
-        .fillColor('#7F8C8D')
-        .text(`Generated on ${new Date().toLocaleString()}`, 50, 760)
-        .text(`Page ${i + 1} of ${pageCount}`, 450, 760);
+        // Footer text
+        doc.fontSize(8)
+          .fillColor('#7F8C8D')
+          .text(`Generated on ${new Date().toLocaleString()}`, 50, 760)
+          .text(`Page ${i + 1} of ${pageCount}`, 450, 760);
+      }
+    } catch (error) {
+      console.error('Error adding footer:', error);
+      // Skip footer if there's an error - don't let it break the whole report
     }
   }
 

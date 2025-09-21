@@ -665,11 +665,35 @@ const InterviewerDashboard = () => {
     }
   };
 
-  const endSession = () => {
+  const endSession = async () => {
     if (window.confirm("Are you sure you want to end the interview session?")) {
+      try {
+        // End the interview session in backend
+        console.log('🔚 Ending interview session:', sessionId);
+        const apiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/interviews/${sessionId}/end`;
+
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          console.log('✅ Interview ended successfully:', data);
+        } else {
+          console.error('❌ Failed to end interview:', data.message);
+        }
+      } catch (error) {
+        console.error('❌ Error ending interview:', error);
+      }
+
+      // Emit socket event to notify other participants
       if (socket) {
         socket.emit("end-session", { sessionId });
       }
+
       cleanup();
       navigate(`/report/${sessionId}`);
     }
