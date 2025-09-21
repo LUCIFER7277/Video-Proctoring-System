@@ -54,7 +54,12 @@ class ReportGenerator {
         throw new Error('Interview not found');
       }
 
-      console.log('Interview found:', interview.candidateName);
+      console.log('Interview found:', {
+        candidateName: interview.candidateName,
+        candidateEmail: interview.candidateEmail,
+        interviewerName: interview.interviewerName,
+        sessionId: interview.sessionId
+      });
 
       // Fetch violations - prioritize sessionId since that's how violations are stored
       let violations = await Violation.find({ sessionId: interview.sessionId }).sort({ timestamp: 1 });
@@ -126,12 +131,39 @@ class ReportGenerator {
         console.log('Violation summary data:', violationSummary);
       }
 
+      // Handle placeholder candidate information
+      let candidateName = interview.candidateName;
+      let candidateEmail = interview.candidateEmail;
+
+      // If candidate info is still placeholder, try to get better info
+      if (candidateName === 'TBD' || candidateName === 'Unknown' || !candidateName) {
+        // Try to extract from violations or other sources
+        const candidateViolation = violations.find(v => v.candidateName && v.candidateName !== 'TBD');
+        if (candidateViolation) {
+          candidateName = candidateViolation.candidateName;
+        } else {
+          candidateName = `Candidate ${interview.sessionId.slice(0, 8)}`;
+        }
+      }
+
+      if (candidateEmail === 'candidate@example.com' || !candidateEmail) {
+        // Try to extract from violations or other sources
+        const candidateViolation = violations.find(v => v.candidateEmail && v.candidateEmail !== 'candidate@example.com');
+        if (candidateViolation) {
+          candidateEmail = candidateViolation.candidateEmail;
+        } else {
+          candidateEmail = 'Not provided';
+        }
+      }
+
       // Debug: Log interview statistics
       console.log('Interview statistics:', {
         violationCount: interview.violationCount,
         focusLostCount: interview.focusLostCount,
         objectViolationCount: interview.objectViolationCount,
-        integrityScore: interview.integrityScore
+        integrityScore: interview.integrityScore,
+        finalCandidateName: candidateName,
+        finalCandidateEmail: candidateEmail
       });
 
       // Create PDF
@@ -212,7 +244,7 @@ class ReportGenerator {
     // Candidate information in header
     doc.fontSize(16)
       .fillColor('#34495E')
-      .text(`Candidate: ${interview.candidateName || 'Unknown'}`, 50, 90, { align: 'center' });
+      .text(`Candidate: ${candidateName}`, 50, 90, { align: 'center' });
 
     doc.fontSize(14)
       .fillColor('#7F8C8D')
@@ -278,8 +310,8 @@ class ReportGenerator {
 
     doc.fontSize(12)
       .fillColor('#495057')
-      .text(`Name: ${interview.candidateName || 'Unknown'}`, 60, y + 30)
-      .text(`Email: ${interview.candidateEmail || 'N/A'}`, 60, y + 45);
+      .text(`Name: ${candidateName}`, 60, y + 30)
+      .text(`Email: ${candidateEmail}`, 60, y + 45);
 
     doc.moveDown(3);
   }
@@ -301,8 +333,8 @@ class ReportGenerator {
 
       // Candidate basic information
       const candidateDetails = [
-        ['Full Name:', interview.candidateName || 'Unknown'],
-        ['Email Address:', interview.candidateEmail || 'N/A'],
+        ['Full Name:', candidateName],
+        ['Email Address:', candidateEmail],
         ['Session ID:', interview.sessionId || 'N/A'],
         ['Interview Date:', interview.startTime ? new Date(interview.startTime).toLocaleDateString() : 'N/A'],
         ['Interview Time:', interview.startTime ? new Date(interview.startTime).toLocaleTimeString() : 'N/A']
